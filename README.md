@@ -102,6 +102,10 @@ docs/          GitHub Pages 안내 페이지 (데이터 없음)
 
 이후로는 `./serve.sh` 만 돌리면 같은 주소가 계속 쓰인다.
 
+현재 주소: `https://hoonseo-macmini.tailc89dcd.ts.net`
+(안내 페이지 <https://hoonseochoi.github.io/erp/> 의 버튼도 여기로 연결된다.
+ 주소가 바뀌면 `docs/index.html` 의 링크도 같이 고칠 것)
+
 > [!note] 임시 주소가 필요할 때
 > `./serve.sh --quick` 은 Cloudflare quick tunnel 로 즉시 띄운다.
 > 설치·로그인이 필요 없는 대신 **재실행할 때마다 주소가 바뀐다.**
