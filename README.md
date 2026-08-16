@@ -54,12 +54,14 @@ etl/
   cache/       파싱 캐시 (지워도 됨)
 
 dashboard/     Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui + recharts
-  public/data/ meta.json · center.json · benchmark.json  (build.py 산출물)
+  data/        meta.json · center.json · benchmark.json  (build.py 산출물, public/ 밖)
   src/components/ui/         shadcn 프리미티브
   src/components/charts/     차트 키트
   src/components/dashboard/  화면별 섹션
 
 refresh.sh     ETL 재실행
+serve.sh       빌드 + 서버 + 터널 (매니저 원격 접속)
+docs/          GitHub Pages 안내 페이지 (데이터 없음)
 ```
 
 ## 필요한 것
@@ -70,7 +72,8 @@ refresh.sh     ETL 재실행
 ## 매니저 원격 접속
 
 ```bash
-./serve.sh              # 빌드 + 서버 + Cloudflare 터널, 접속 주소를 출력
+./serve.sh              # 고정 주소 (Tailscale Funnel) — 권장
+./serve.sh --quick      # 임시 주소 (Cloudflare quick tunnel, 매번 바뀜)
 ./serve.sh --local      # 터널 없이 사무실 네트워크에서만
 ./serve.sh --no-build   # 이미 빌드돼 있으면
 ```
@@ -79,17 +82,29 @@ refresh.sh     ETL 재실행
 터널은 바깥에서 이 맥까지 오는 길만 뚫어줄 뿐이라, Supabase 같은 외부 DB가 필요 없다.
 
 ```
-매니저 브라우저 → Cloudflare → 이 맥(next start) → dashboard/data/*.json → 렌더 → 응답
+매니저 브라우저 → 터널(HTTPS) → 이 맥(next start) → dashboard/data/*.json → 렌더 → 응답
 ```
 
 - 맥이 꺼지거나 잠들면 접속도 끊긴다. 항상 켜 둘 것
 - 터미널 창을 닫으면 서버와 터널이 같이 내려간다
 - 주소와 비밀번호는 **따로** 전달할 것
 
-> [!important] 무료 quick tunnel 은 주소가 매번 바뀐다
-> `./serve.sh` 를 다시 실행하면 `*.trycloudflare.com` 주소가 새로 발급된다.
-> 고정 주소가 필요하면 도메인을 Cloudflare 에 올리고 named tunnel 로 바꿔야 한다.
-> (`cloudflared tunnel login` → `cloudflared tunnel create` → DNS 라우팅)
+### 고정 주소 (Tailscale Funnel)
+
+`https://<머신이름>.<테일넷>.ts.net` 형태의 **바뀌지 않는 HTTPS 주소**가 나온다.
+도메인을 살 필요 없고 무료다. 매니저는 링크만 열면 되고 앱 설치도 필요 없다.
+
+최초 1회만 준비하면 된다.
+
+1. `/Applications/Tailscale.app` 실행 → 시스템 확장 설치 허용(관리자 비밀번호)
+2. 로그인 (브라우저)
+3. `./serve.sh` 실행. Funnel 이 처음이면 로그에 뜬 링크에서 사용 허용
+
+이후로는 `./serve.sh` 만 돌리면 같은 주소가 계속 쓰인다.
+
+> [!note] 임시 주소가 필요할 때
+> `./serve.sh --quick` 은 Cloudflare quick tunnel 로 즉시 띄운다.
+> 설치·로그인이 필요 없는 대신 **재실행할 때마다 주소가 바뀐다.**
 
 ## 접속 보호
 
