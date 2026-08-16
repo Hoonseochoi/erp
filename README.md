@@ -67,6 +67,30 @@ refresh.sh     ETL 재실행
 - Python 3.9+ / `pyxlsb`, `openpyxl`, `msoffcrypto-tool`
 - Node 20+
 
+## 매니저 원격 접속
+
+```bash
+./serve.sh              # 빌드 + 서버 + Cloudflare 터널, 접속 주소를 출력
+./serve.sh --local      # 터널 없이 사무실 네트워크에서만
+./serve.sh --no-build   # 이미 빌드돼 있으면
+```
+
+**이 맥이 곧 서버다.** 데이터는 `dashboard/data/` 에만 있고 어디에도 업로드되지 않는다.
+터널은 바깥에서 이 맥까지 오는 길만 뚫어줄 뿐이라, Supabase 같은 외부 DB가 필요 없다.
+
+```
+매니저 브라우저 → Cloudflare → 이 맥(next start) → dashboard/data/*.json → 렌더 → 응답
+```
+
+- 맥이 꺼지거나 잠들면 접속도 끊긴다. 항상 켜 둘 것
+- 터미널 창을 닫으면 서버와 터널이 같이 내려간다
+- 주소와 비밀번호는 **따로** 전달할 것
+
+> [!important] 무료 quick tunnel 은 주소가 매번 바뀐다
+> `./serve.sh` 를 다시 실행하면 `*.trycloudflare.com` 주소가 새로 발급된다.
+> 고정 주소가 필요하면 도메인을 Cloudflare 에 올리고 named tunnel 로 바꿔야 한다.
+> (`cloudflared tunnel login` → `cloudflared tunnel create` → DNS 라우팅)
+
 ## 접속 보호
 
 데이터는 전부 로컬에만 있고, 대시보드는 비밀번호 게이트 뒤에 있다.
@@ -84,14 +108,15 @@ refresh.sh     ETL 재실행
 - **HTTPS 로 외부에 열 때는 `SECURE_COOKIE=1`** 로 켠다.
   (로컬 http 에서 켜면 쿠키가 저장되지 않아 로그인이 무한 반복된다.)
 
-같은 네트워크의 다른 기기에서 볼 때:
-
-```bash
-npm --prefix dashboard run dev -- -H 0.0.0.0
-```
-
-> 4자리 숫자는 경우의 수가 1만개다. 시도 제한이 있긴 하지만, 인터넷에 직접
-> 노출할 거라면 더 긴 비밀번호를 쓰는 편이 안전하다. `.env.local` 만 고치면 된다.
+> [!warning] 인터넷에 열어 뒀다면 비밀번호를 늘릴 것
+> 4자리 숫자는 경우의 수가 1만개다. 시도 제한(10분 8회)이 있지만 그건 속도를
+> 늦출 뿐이고, 주소만 알면 전 세계 누구나 로그인 창까지는 닿는다.
+> 설계사 319명의 실명·코드·실적이 뒤에 있다는 걸 감안하면 8자 이상을 권한다.
+>
+> ```bash
+> # dashboard/.env.local 의 APP_PASSWORD 만 고치고 서버 재시작
+> ```
+> `AUTH_SECRET` 을 따로 지정해 뒀으면 비밀번호를 바꿔도 기존 로그인은 유지된다.
 
 ## 저장소에 올리지 않는 것
 

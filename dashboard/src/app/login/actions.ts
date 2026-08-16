@@ -15,9 +15,17 @@ import {
 
 export type LoginState = { error: string | null };
 
-/** 프록시/터널 뒤에서도 쓸 수 있는 대략적인 클라이언트 식별자. */
+/**
+ * 시도 제한을 걸 클라이언트 식별자.
+ *
+ * Cloudflare Tunnel 뒤에서는 접속자 IP 가 CF-Connecting-IP 로 온다.
+ * 이걸 안 보면 모든 접속자가 터널 IP 하나로 뭉쳐서, 한 사람이 8번 틀리면
+ * 나머지 매니저까지 같이 잠긴다.
+ */
 async function clientKey() {
   const h = await headers();
+  const cf = h.get("cf-connecting-ip");
+  if (cf) return cf.trim();
   const fwd = h.get("x-forwarded-for");
   return (fwd?.split(",")[0] ?? h.get("x-real-ip") ?? "local").trim();
 }
