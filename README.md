@@ -14,11 +14,15 @@
 # 1. 목표 파일 만들기
 cp etl/targets.example.json etl/targets.json   # 실제 목표를 채워 넣는다 (단위: 천원)
 
-# 2. 의존성
+# 2. 접속 비밀번호 설정
+cp dashboard/.env.example dashboard/.env.local # APP_PASSWORD 를 채운다
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # AUTH_SECRET 에 붙여넣기
+
+# 3. 의존성
 python3 -m pip install pyxlsb openpyxl msoffcrypto-tool
 npm --prefix dashboard install
 
-# 3. 원본 실적 파일을 ~/Documents/private 에 놓고 아래 실행
+# 4. 원본 실적 파일을 ~/Documents/private 에 놓고 아래 실행
 ./refresh.sh
 ```
 
@@ -63,16 +67,45 @@ refresh.sh     ETL 재실행
 - Python 3.9+ / `pyxlsb`, `openpyxl`, `msoffcrypto-tool`
 - Node 20+
 
+## 접속 보호
+
+데이터는 전부 로컬에만 있고, 대시보드는 비밀번호 게이트 뒤에 있다.
+
+```
+비로그인 요청  →  /login 으로 307
+세션 쿠키      →  httpOnly + HMAC 서명 (위조·만료 토큰 거부), 유효기간 12시간
+시도 제한      →  10분에 8회, 초과 시 잠금
+데이터 파일    →  public/ 밖(dashboard/data/)이라 URL 로 직접 접근 불가
+```
+
+- 비밀번호는 `dashboard/.env.local` 의 `APP_PASSWORD` 에만 있다. **코드에 없다.**
+- `AUTH_SECRET` 을 비워 두면 비밀번호에서 유도한다. 직접 넣으면 비밀번호를 바꿔도
+  기존 세션이 유지된다.
+- **HTTPS 로 외부에 열 때는 `SECURE_COOKIE=1`** 로 켠다.
+  (로컬 http 에서 켜면 쿠키가 저장되지 않아 로그인이 무한 반복된다.)
+
+같은 네트워크의 다른 기기에서 볼 때:
+
+```bash
+npm --prefix dashboard run dev -- -H 0.0.0.0
+```
+
+> 4자리 숫자는 경우의 수가 1만개다. 시도 제한이 있긴 하지만, 인터넷에 직접
+> 노출할 거라면 더 긴 비밀번호를 쓰는 편이 안전하다. `.env.local` 만 고치면 된다.
+
 ## 저장소에 올리지 않는 것
+
+이 저장소는 **public** 이다. 아래는 전부 로컬에만 둔다.
 
 | 대상 | 이유 |
 |---|---|
-| `dashboard/public/data/*.json` | 설계사 실명·사용인코드·개인 실적. `./refresh.sh` 로 재생성됨 |
+| `dashboard/data/*.json` | 설계사 실명·사용인코드·개인 실적. `./refresh.sh` 로 재생성됨 |
 | `etl/cache/` | 본부 전체 11,865명 파싱 캐시 (수십 MB) |
 | `etl/targets.json` | 지점별 목표. 대외비 → `targets.example.json` 참고 |
+| `dashboard/.env.local` | 접속 비밀번호·서명 키 → `.env.example` 참고 |
 | `*.xlsb`, `*.xlsx` | 원본 실적 파일 |
 
-원본과 목표만 로컬에 있으면 나머지는 전부 명령 한 줄로 복원된다.
+원본·목표·비밀번호만 로컬에 있으면 나머지는 전부 명령 한 줄로 복원된다.
 
 ## 지표 요약
 

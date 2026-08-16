@@ -4,7 +4,7 @@
 # 설계사 실명·사용인코드·개인 실적이 들어 있다.
 # 원본 파일만 있으면 ./refresh.sh 로 언제든 재생성되므로 저장소에 둘 이유가 없다.
 etl/cache/
-dashboard/public/data/*.json
+dashboard/data/*.json
 
 # 지점별 월 목표 (사내 대외비). 구조는 targets.example.json 참고.
 etl/targets.json

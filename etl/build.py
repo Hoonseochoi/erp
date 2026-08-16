@@ -50,7 +50,9 @@ import schema  # noqa: E402
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 DEFAULT_SRC = Path("/Users/hoons/Documents/private")
-DEFAULT_OUT = ROOT / "dashboard" / "public" / "data"
+# public/ 이 아니라 dashboard/data/ 에 쓴다.
+# public/ 에 두면 로그인과 무관하게 /data/center.json 으로 그대로 뚫린다.
+DEFAULT_OUT = ROOT / "dashboard" / "data"
 
 FOCUS_CENTER = "경인.GA7센터"
 AWARD_LABEL = {k: label for k, label, *_ in schema.AWARDS}

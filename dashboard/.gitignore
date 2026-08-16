@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 템플릿은 커밋한다 (실제 값이 든 .env.local 은 위에서 이미 제외됨)
+!.env.example

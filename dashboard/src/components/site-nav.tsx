@@ -1,6 +1,8 @@
 "use client";
 
-import { Building2, CalendarDays, Menu } from "lucide-react";
+import { Building2, CalendarDays, LogOut, Menu } from "lucide-react";
+
+import { logout } from "@/app/login/actions";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +66,18 @@ export function SiteNav({
           </Badge>
           <Separator orientation="vertical" className="hidden h-6 sm:block" />
           <ThemeToggle />
+          <form action={logout}>
+            <Button
+              type="submit"
+              variant="ghost"
+              size="icon"
+              className="hidden h-7 w-7 md:inline-flex"
+              aria-label="로그아웃"
+              title="로그아웃"
+            >
+              <LogOut className="h-[15px] w-[15px]" />
+            </Button>
+          </form>
           <Sheet>
             <SheetTrigger asChild>
               <Button
@@ -94,6 +108,16 @@ export function SiteNav({
                 <span className="text-xs text-muted-foreground">
                   {focus.hq} · {focus.dept}
                 </span>
+                <form action={logout}>
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    className="h-8 w-full justify-start px-2 text-sm font-normal"
+                  >
+                    <LogOut className="mr-2 h-3.5 w-3.5" />
+                    로그아웃
+                  </Button>
+                </form>
               </nav>
             </SheetContent>
           </Sheet>
