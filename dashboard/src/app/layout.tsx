@@ -7,8 +7,8 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "경인.GA7센터 매출 대시보드",
-  description: "일간·주간·월간 실적 추이와 시상 진척",
+  title: { default: "매출 대시보드", template: "%s" },
+  description: "팀 · 영업단 · 센터 3단 실적 대시보드",
 };
 
 export default function RootLayout({

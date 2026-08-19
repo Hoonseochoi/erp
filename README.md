@@ -1,7 +1,13 @@
-# 경인.GA7센터 매출 대시보드
+# 매출 대시보드 (팀 → 영업단 → 센터)
 
 매일 들어오는 **월 누적** 실적 파일을 쌓아 두고, 스냅샷 간 차분으로 **일간 매출**을 복원해
-지사 / 설계사 / 시상 / 조직 4개 축으로 분석한다.
+**팀 → 영업단 → 센터** 3단으로 드릴다운한다. 각 층에서 궤도를 벗어난 조직을 통계로 짚어낸다.
+
+```
+팀(수도권마케팅2팀)  →  영업단 7개  →  센터 30개  →  지사 2,026개  →  설계사
+                     ↕
+              운영 대리점 114개 (조직도를 가로지르는 축)
+```
 
 제작 배경·판단 근거·분석 결과는 Obsidian 에 정리돼 있다:
 `~/Documents/Obsidian Vault/매출 DASHBOARD/`
@@ -22,25 +28,27 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # AUTH
 python3 -m pip install pyxlsb openpyxl msoffcrypto-tool
 npm --prefix dashboard install
 
-# 4. 원본 실적 파일을 ~/Documents/private 에 놓고 아래 실행
+# 4. 원본 실적 파일을 ~/Documents/RAW DATA 에 놓고 아래 실행
 ./refresh.sh
 ```
 
 ## 쓰는 법
 
 ```bash
-# 1. 새 파일을 ~/Documents/private 에 넣고
+# 1. 새 파일을 ~/Documents/RAW DATA 에 넣고
 ./refresh.sh
 
 # 2. 대시보드 실행
 npm --prefix dashboard run dev   # → http://localhost:3000
 ```
 
-다른 지점으로 보려면:
+| 화면 | 경로 |
+|---|---|
+| 팀 | `/` |
+| 영업단 | `/dept/{부서코드}` |
+| 센터 | `/center/{지점코드}` |
 
-```bash
-python3 etl/build.py --focus "경인.GA2센터"
-```
+상단 햄버거를 열면 조직 트리 전체 + 검색으로 어디로든 점프한다.
 
 > **이전 날짜 파일을 지우지 말 것.** 하루치가 사라지면 그날의 일간 실적은 복원되지 않는다.
 
@@ -48,16 +56,18 @@ python3 etl/build.py --focus "경인.GA2센터"
 
 ```
 etl/
-  schema.py    '설계사' 시트 124개 컬럼 · 시상 22개 항목 정의
+  schema.py    '설계사' 시트 124개 컬럼 · 시상 22개 항목 · 조직 코드
   reader.py    .xlsb / 암호(0000) .xlsx 파싱 + 캐시
-  build.py     차분 · 집계 · 시상 기준선 역산 → JSON 3종
+  stats.py     중앙값·MAD·로버스트 z·모멘텀·집중도(HHI)
+  build.py     차분 · 3단 계층 집계 · 시상 기준선 역산
   cache/       파싱 캐시 (지워도 됨)
 
 dashboard/     Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui + recharts
-  data/        meta.json · center.json · benchmark.json  (build.py 산출물, public/ 밖)
-  src/components/ui/         shadcn 프리미티브
-  src/components/charts/     차트 키트
-  src/components/dashboard/  화면별 섹션
+  data/        index · team · dept/{코드} · center/{코드}   (public/ 밖)
+  src/app/     page(팀) · dept/[code] · center/[code]
+  src/components/org/     세 층이 공유하는 컴포넌트
+  src/components/charts/  차트 키트
+  src/components/ui/      shadcn 프리미티브
 
 refresh.sh     ETL 재실행
 serve.sh       빌드 + 서버 + 터널 (매니저 원격 접속)
@@ -143,7 +153,7 @@ docs/          GitHub Pages 안내 페이지 (데이터 없음)
 
 | 대상 | 이유 |
 |---|---|
-| `dashboard/data/*.json` | 설계사 실명·사용인코드·개인 실적. `./refresh.sh` 로 재생성됨 |
+| `dashboard/data/**.json` | 설계사 실명·사용인코드·개인 실적. `./refresh.sh` 로 재생성됨 |
 | `etl/cache/` | 본부 전체 11,865명 파싱 캐시 (수십 MB) |
 | `etl/targets.json` | 지점별 목표. 대외비 → `targets.example.json` 참고 |
 | `dashboard/.env.local` | 접속 비밀번호·서명 키 → `.env.example` 참고 |
@@ -160,8 +170,11 @@ docs/          GitHub Pages 안내 페이지 (데이터 없음)
 | 가동 | 당월 실적 > 0 인 설계사 |
 | 가동률 | 가동 인원 ÷ 재적 설계사수('지사' 시트) |
 | 월말 예상 | 영업일(월~금) 기준 run-rate × 총 영업일 |
-| **달성률** | 누적 실적 ÷ 월 목표. **지점 비교의 유일한 잣대** (목표가 지점마다 3~4배 다름) |
+| **달성률** | 누적 실적 ÷ 월 목표. 목표가 등록된 조직만 |
 | 페이스 | 달성률 − 영업일 진척률. +면 계획보다 앞선 것 |
+| 인당생산성 | 실적 ÷ 재적. **목표가 없어도 규모 보정 비교**가 되는 잣대 |
+| z-score | 동료 집단 중앙값 대비 편차 (MAD 기준). −2 이하면 이탈 |
+| 모멘텀 | 최근 3일 속도 ÷ 이전 3일 속도. 1 미만이면 감속 |
 | 시상금 | 설계사 개인이 받는 돈. **조직 단위로 합산하지 않는다** — 설계사 탭에만 표시 |
 
 목표는 `etl/targets.json` 에서 읽는다 (단위 천원, 월별). **매달 초에 갱신해야 한다.**

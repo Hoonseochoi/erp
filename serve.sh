@@ -43,7 +43,7 @@ if ! grep -q '^APP_PASSWORD=.\+' dashboard/.env.local; then
   echo "✗ APP_PASSWORD 가 비어 있습니다. 비밀번호 없이는 아무도 못 들어옵니다."
   exit 1
 fi
-if [ ! -f dashboard/data/center.json ]; then
+if [ ! -f dashboard/data/team.json ]; then
   echo "✗ 데이터가 없습니다. 먼저 ./refresh.sh 를 실행하세요."
   exit 1
 fi

@@ -83,6 +83,9 @@ PREMIER = {"target": 99, "m7": 100, "m8": 101, "m9": 102, "m10": 103, "m11": 104
 
 # --- '지사' 시트 (xlsb 에만 존재) -------------------------------------------
 # 지사별 재적 설계사수 → 가동률 분모
+# '설계사' 시트에서 조직 코드도 뽑는다 — URL slug 와 조인 키로 쓴다.
+ORG_CODE = {"hq": 2, "dept": 4, "center": 6}
+
 BRANCH_COL = {
     "hq": 1, "hq_code": 2, "dept": 3, "dept_code": 4,
     "center": 5, "center_code": 6, "center_head": 7,

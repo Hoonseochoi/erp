@@ -1,458 +1,462 @@
-"""스냅샷들을 모아 대시보드용 JSON 을 생성한다.
+"""스냅샷 → 팀 / 영업단 / 센터 3단 계층 JSON 생성.
 
 핵심 아이디어
 -------------
-원본 파일은 "월 누적 스냅샷"이다. 일간 매출은 파일 안에 없고,
-연속된 두 스냅샷의 차분(diff)으로만 만들어진다.
+원본은 "월 누적 스냅샷"이다. 일간 매출은 파일에 없고 연속된 두 스냅샷의
+차분으로만 만들어진다.  일간(D) = 누적(D) − 누적(D−1)
 
-    일간 실적(D) = 누적(D) - 누적(D-1)
+조직 계층
+---------
+    팀(본부)  →  영업단(부서)  →  센터(지점)  →  지사  →  설계사
+    수도권2팀      7개              30개          2,026개   12,366명
 
-그래서 과거 파일을 계속 보관해야 하고, 파일이 빠진 날은 구간(spanDays)으로
-표시해 "일평균"으로 환산할 수 있게 한다.
+각 층은 같은 모양의 레코드로 만들어서 화면 컴포넌트를 그대로 재사용한다.
+자식 목록(children)과 대리점 롤업(agencies)이 층마다 붙는다.
 
 지표
 ----
-  실적(cred) : '인실적' 컬럼. **매출의 유일한 기준.** 단위는 천원.
-               주차별로 쪼개져 있어 주간 분석도 이 값으로 한다.
-  환산P      : 프로본부 환산성적. 현업에서 안 쓰는 지표라 화면에 띄우지 않는다.
-               데이터 검증용으로만 payload 에 남겨 둔다.
-  가동       : 당월 실적 > 0 인 설계사
-  가동률     : 가동인원 / 지사 재적 설계사수
+  실적(cred) : '인실적'. 매출의 유일한 기준. 단위 천원
+  달성률     : 실적 ÷ 목표. 목표가 있는 조직만
+  인당생산성 : 실적 ÷ 재적 — 목표가 없어도 규모 보정 비교가 되는 잣대
+  모멘텀     : 최근 3일 속도 ÷ 이전 3일 속도
+  z          : 동료 집단 안에서의 로버스트 편차 (stats.py)
 
-시상금은 설계사 개인이 받는 돈이라 조직 단위로 합산하지 않는다.
-항목별로는 '몇 명이 받는가'만 보고, 금액은 설계사별로만 노출한다.
-
-목표
+출력
 ----
-지점마다 목표가 크게 다르다. 절대 실적으로 지점을 줄 세우면 목표가 큰 지점이
-무조건 위로 가서 아무 의미가 없다. **달성률이 진짜 성적표**다.
-목표는 etl/targets.json 에서 읽는다(단위 천원, 월별).
-
-사용법
-------
-    python3 etl/build.py            # 기본 경로
-    python3 etl/build.py --src ... --out ...
+  data/index.json        조직 트리 + 메타
+  data/team.json         팀
+  data/dept/{코드}.json  영업단
+  data/center/{코드}.json 센터
 """
 from __future__ import annotations
 
 import argparse
 import datetime
 import json
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import reader  # noqa: E402
-import schema  # noqa: E402
+import reader   # noqa: E402
+import schema   # noqa: E402
+import stats    # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-DEFAULT_SRC = Path("/Users/hoons/Documents/private")
-# public/ 이 아니라 dashboard/data/ 에 쓴다.
-# public/ 에 두면 로그인과 무관하게 /data/center.json 으로 그대로 뚫린다.
+DEFAULT_SRC = Path("/Users/hoons/Documents/RAW DATA")
 DEFAULT_OUT = ROOT / "dashboard" / "data"
+TARGETS_FILE = HERE / "targets.json"
 
 FOCUS_CENTER = "경인.GA7센터"
 AWARD_LABEL = {k: label for k, label, *_ in schema.AWARDS}
-TARGETS_FILE = HERE / "targets.json"
 
 
 def r(x, n=1):
-    return round(x, n)
+    return None if x is None else round(x, n)
 
 
 def load_targets(month: str):
-    """{지점명: 목표(천원)} — 해당 월 정의가 없으면 빈 dict."""
     if not TARGETS_FILE.exists():
         return {}
     raw = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))
     return raw.get("months", {}).get(month, {}).get("centers", {})
 
 
-def build(src: Path, out: Path, focus: str):
+# ===========================================================================
+# 집계 헬퍼
+# ===========================================================================
+def daily_rows(per_date, dates, keep):
+    """주어진 필터(keep)를 통과한 사람들만으로 일간 시계열을 만든다."""
+    out, prev, prev_d = [], None, None
+    for i, d in enumerate(dates):
+        cur = {k: p for k, p in per_date[i].items() if keep(p)}
+        cred = sum(p["cred"] for p in cur.values())
+        active = sum(1 for p in cur.values() if p["cred"] > 0)
+        if prev is None:
+            d_cred = new_active = span = None
+        else:
+            d_cred = cred - sum(p["cred"] for p in prev.values())
+            new_active = sum(1 for k, p in cur.items()
+                             if p["cred"] > 0 and (k not in prev or prev[k]["cred"] <= 0))
+            span = (datetime.date.fromisoformat(d) - datetime.date.fromisoformat(prev_d)).days
+        out.append({
+            "date": d, "cred": r(cred), "dCred": r(d_cred), "spanDays": span,
+            "roster": len(cur), "active": active, "newActive": new_active,
+        })
+        prev, prev_d = cur, d
+    return out
+
+
+def rollup(per_date, dates, keep, group, headcount_map, targets=None):
+    """자식 조직 단위 롤업 + 각 자식의 일별 누적 시계열."""
+    series = defaultdict(dict)
+    for i, d in enumerate(dates):
+        agg = defaultdict(lambda: [0.0, 0, 0])
+        for p in per_date[i].values():
+            if not keep(p):
+                continue
+            g = group(p)
+            if g is None:
+                continue
+            a = agg[g]
+            a[0] += p["cred"]
+            a[1] += 1
+            a[2] += 1 if p["cred"] > 0 else 0
+        for g, v in agg.items():
+            series[g][d] = v
+
+    units = []
+    for g, ser in series.items():
+        key, name = g if isinstance(g, tuple) else (g, g)
+        cur = ser.get(dates[-1], [0.0, 0, 0])
+        prev = ser.get(dates[-2], [0.0, 0, 0]) if len(dates) > 1 else [0.0, 0, 0]
+        hc = headcount_map.get(key, 0)
+        tgt = (targets or {}).get(key)
+        units.append({
+            "key": str(key), "name": name,
+            "cred": r(cur[0]), "dCred": r(cur[0] - prev[0]),
+            "roster": cur[1], "active": cur[2], "headcount": hc,
+            "target": tgt,
+            "achievedPct": r(cur[0] / tgt * 100, 1) if tgt else None,
+            "activeRate": r(cur[2] / hc * 100, 1) if hc else None,
+            "perCapita": r(cur[0] / hc, 2) if hc else None,
+            "perActive": r(cur[0] / cur[2], 1) if cur[2] else None,
+            "series": [{"date": d, "cred": r(ser.get(d, [0, 0, 0])[0])} for d in dates],
+        })
+    return units
+
+
+def add_stats(units, dates):
+    """동료 집단 안에서의 위치와 궤도 이탈 판정을 붙인다."""
+    # 모멘텀: 각 자식의 누적 시계열에서 일간 속도를 되살려 계산
+    for u in units:
+        s = u["series"]
+        dl = []
+        for i in range(1, len(s)):
+            span = (datetime.date.fromisoformat(s[i]["date"])
+                    - datetime.date.fromisoformat(s[i - 1]["date"])).days
+            dl.append({"dCred": s[i]["cred"] - s[i - 1]["cred"], "spanDays": span})
+        u["momentum"] = r(stats.momentum(dl), 2)
+
+    # 비교 잣대: 목표가 모두 있으면 달성률, 아니면 인당생산성
+    has_target = all(u["achievedPct"] is not None for u in units) and len(units) > 2
+    field = "achievedPct" if has_target else "perCapita"
+    vals = [u[field] for u in units if u[field] is not None]
+    med = stats.median(vals)
+    scale = stats.mad(vals, med)
+    for u in units:
+        u["z"] = r(stats.robust_z(u[field], vals, med, scale), 2)
+    return {
+        "field": field,
+        "label": "달성률" if has_target else "인당생산성",
+        "band": stats.band(vals),
+    }
+
+
+def agency_rollup(per_date, dates, keep, top=15):
+    """운영 대리점(GA 법인) 단위 롤업 — 팀·영업단 화면의 '큰 류'."""
+    last, prev = per_date[-1], (per_date[-2] if len(dates) > 1 else {})
+    agg = defaultdict(lambda: [0.0, 0.0, 0, set(), set()])
+    for p in last.values():
+        if not keep(p):
+            continue
+        a = agg[p["agency"]]
+        a[0] += p["cred"]
+        a[2] += 1 if p["cred"] > 0 else 0
+        a[3].add(p["center"])
+        a[4].add(p["branchCode"] or p["branch"])
+    for p in prev.values():
+        if keep(p) and p["agency"] in agg:
+            agg[p["agency"]][1] += p["cred"]
+    tot = sum(v[0] for v in agg.values()) or 1
+    rows = [{
+        "name": k, "cred": r(v[0]), "dCred": r(v[0] - v[1]),
+        "active": v[2], "centers": len(v[3]), "branches": len(v[4]),
+        "share": r(v[0] / tot * 100, 1),
+    } for k, v in agg.items()]
+    rows.sort(key=lambda x: -x["cred"])
+    return rows[:top], len(rows), stats.concentration([v[0] for v in agg.values()])
+
+
+def top_branches(per_date, dates, keep, hc_branch, top=15):
+    """지사 단위 상위 목록 — 영업단·센터 화면."""
+    last, prev = per_date[-1], (per_date[-2] if len(dates) > 1 else {})
+    agg = defaultdict(lambda: [0.0, 0.0, 0, 0, "", "", ""])
+    for p in last.values():
+        if not keep(p):
+            continue
+        k = p["branchCode"] or p["branch"]
+        a = agg[k]
+        a[0] += p["cred"]
+        a[2] += 1 if p["cred"] > 0 else 0
+        a[3] += 1
+        a[4], a[5], a[6] = p["branch"], p["agency"], p["center"]
+    for p in prev.values():
+        if keep(p):
+            k = p["branchCode"] or p["branch"]
+            if k in agg:
+                agg[k][1] += p["cred"]
+    rows = [{
+        "key": str(k), "name": v[4], "agency": v[5], "center": v[6],
+        "cred": r(v[0]), "dCred": r(v[0] - v[1]),
+        "active": v[2], "roster": v[3], "headcount": hc_branch.get(k, 0),
+        "activeRate": r(v[2] / hc_branch[k] * 100, 1) if hc_branch.get(k) else None,
+    } for k, v in agg.items()]
+    rows.sort(key=lambda x: -x["cred"])
+    return rows[:top], len(rows)
+
+
+# ===========================================================================
+# 센터 상세 (지사 · 설계사 · 시상)
+# ===========================================================================
+def center_detail(snaps, dates, per_date, center, hc_branch, branch_meta):
+    latest = snaps[-1]
+    rows = [p for p in latest["people"] if p["center"] == center]
+    last = {k: p for k, p in per_date[-1].items() if p["center"] == center}
+    prev = {k: p for k, p in per_date[-2].items() if p["center"] == center} if len(dates) > 1 else {}
+
+    weeks = [{
+        "week": w + 1, "label": f"{w+1}주차",
+        "cred": r(sum(p["weeks"][w] for p in rows)),
+        "people": sum(1 for p in rows if p["weeks"][w] > 0),
+    } for w in range(5)]
+
+    people = []
+    for k, p in last.items():
+        pv = prev.get(k)
+        items = sorted(({"label": AWARD_LABEL[ak], "money": a["money"]}
+                        for ak, a in p["awards"].items() if a["money"] > 0),
+                       key=lambda x: -x["money"])
+        ser = []
+        for i, d in enumerate(dates):
+            q = per_date[i].get(k)
+            ser.append({"date": d, "cred": q["cred"] if q else 0.0})
+        people.append({
+            "code": p["code"], "name": p["name"], "branch": p["branch"],
+            "agency": p["agency"], "manager": p["manager"],
+            "cred": p["cred"], "weeks": p["weeks"],
+            "dCred": r(p["cred"] - (pv["cred"] if pv else 0.0), 3),
+            "awardMoney": r(sum(a["money"] for a in items), 0),
+            "awardItems": items, "series": ser,
+        })
+    people.sort(key=lambda x: -x["cred"])
+    for i, p in enumerate(people):
+        p["rank"] = i + 1
+
+    awards = []
+    for key, label, *_ in schema.AWARDS:
+        paid = [p["awards"][key]["perf"] for p in latest["people"]
+                if key in p["awards"] and p["awards"][key]["money"] > 0]
+        th = min(paid) if paid else None
+        elig = [p for p in rows if key in p["awards"]]
+        if not elig:
+            continue
+        done = [p for p in elig if p["awards"][key]["money"] > 0]
+        near = []
+        if th:
+            for p in elig:
+                a = p["awards"][key]
+                if a["money"] > 0:
+                    continue
+                gap = th - a["perf"]
+                if 0 < gap <= th * 0.5:
+                    near.append({"name": p["name"], "branch": p["branch"],
+                                 "manager": p["manager"], "perf": a["perf"], "gap": r(gap, 3)})
+            near.sort(key=lambda x: x["gap"])
+        awards.append({
+            "key": key, "label": label, "eligible": len(elig), "achieved": len(done),
+            "rate": r(len(done) / len(elig) * 100, 1), "threshold": th, "near": near[:20],
+        })
+    awards.sort(key=lambda a: (-a["achieved"], -len(a["near"])))
+
+    mgr = defaultdict(lambda: {"cred": 0.0, "dCred": 0.0, "roster": 0, "active": 0, "b": set()})
+    for p in people:
+        m = mgr[p["manager"] or "미지정"]
+        m["cred"] += p["cred"]; m["dCred"] += p["dCred"]; m["roster"] += 1
+        m["active"] += 1 if p["cred"] > 0 else 0
+        m["b"].add(p["branch"])
+    managers = sorted(({
+        "manager": k, "cred": r(v["cred"]), "dCred": r(v["dCred"]),
+        "roster": v["roster"], "active": v["active"], "branches": len(v["b"]),
+        "activeRate": r(v["active"] / v["roster"] * 100, 1) if v["roster"] else 0,
+    } for k, v in mgr.items()), key=lambda x: -x["cred"])
+
+    return weeks, people, awards, managers
+
+
+# ===========================================================================
+# 메인
+# ===========================================================================
+def build(src: Path, out: Path):
     files = reader.discover(src)
     if not files:
         raise SystemExit(f"스냅샷 파일을 찾지 못했습니다: {src}")
 
     snaps = []
     for p in files:
-        snap = reader.load_snapshot(p, HERE / "cache")
-        if not snap["asOf"]:
-            print(f"  ! 기준일을 못 읽음, 건너뜀: {p.name}")
+        s = reader.load_snapshot(p, HERE / "cache")
+        if not s["asOf"]:
+            print(f"  ! 기준일 없음, 건너뜀: {p.name}")
             continue
-        snaps.append(snap)
-        print(f"  · {snap['asOf']}  {p.name}  ({len(snap['people'])}행)")
-    snaps.sort(key=lambda s: s["asOf"])
-
-    # 같은 기준일이 둘 이상이면 뒤엣것으로 덮어씀
-    dedup = {}
-    for s in snaps:
-        dedup[s["asOf"]] = s
+        snaps.append(s)
+        print(f"  · {s['asOf']}  {p.name}  ({len(s['people']):,}행)")
+    dedup = {s["asOf"]: s for s in sorted(snaps, key=lambda x: x["asOf"])}
     snaps = [dedup[k] for k in sorted(dedup)]
-
     dates = [s["asOf"] for s in snaps]
     latest = snaps[-1]
+
     targets = load_targets(dates[-1][:7])
-    if targets:
-        print(f"  · 목표 {len(targets)}개 지점 로드 ({dates[-1][:7]})")
-    else:
-        print(f"  ! {dates[-1][:7]} 목표가 targets.json 에 없습니다 — 달성률 표시 생략")
+    print(f"  · 목표 {len(targets)}개 지점 로드 ({dates[-1][:7]})" if targets
+          else f"  ! {dates[-1][:7]} 목표 없음 — 인당생산성으로 비교")
 
-    # ---------------- 지사 재적 인원 (최신 xlsb 기준) ----------------------
-    headcount = {}
-    branch_meta = {}
+    # 재적 인원 (지사 시트) --------------------------------------------------
+    hc_branch, hc_center, hc_dept, branch_meta = {}, defaultdict(int), defaultdict(int), {}
+    team = latest["people"][0]["hq"]
     for s in reversed(snaps):
-        if s["branches"]:
-            for b in s["branches"]:
-                key = b["branchCode"] or b["branch"]
-                headcount[key] = b["headcount"]
-                branch_meta[key] = b
-            break
-
-    # ---------------- 포커스 조직 정보 ------------------------------------
-    focus_rows = [p for p in latest["people"] if p["center"] == focus]
-    if not focus_rows:
-        centers = sorted({p["center"] for p in latest["people"] if p["center"]})
-        raise SystemExit(f"'{focus}' 를 찾지 못했습니다. 가능한 지점명:\n  " + "\n  ".join(centers))
-    focus_info = {
-        "center": focus,
-        "dept": focus_rows[0]["dept"],
-        "hq": focus_rows[0]["hq"],
-        "centerHead": focus_rows[0]["centerHead"],
-    }
-
-    # =====================================================================
-    # 1) 포커스 센터 : 일간 시계열
-    # =====================================================================
-    def key_of(p):
-        return p["code"] or p["name"]
-
-    per_date = []          # [{code: person_record}]
-    for s in snaps:
-        per_date.append({key_of(p): p for p in s["people"] if p["center"] == focus})
-
-    daily = []
-    prev_map = None
-    prev_date = None
-    for i, d in enumerate(dates):
-        cur = per_date[i]
-        conv = sum(p["convP"] for p in cur.values())
-        cred = sum(p["cred"] for p in cur.values())
-        active = sum(1 for p in cur.values() if p["cred"] > 0)
-        active_conv = sum(1 for p in cur.values() if p["convP"] > 0)
-        if prev_map is None:
-            d_conv = d_cred = None
-            new_active = None
-            span = None
-        else:
-            d_conv = conv - sum(p["convP"] for p in prev_map.values())
-            d_cred = cred - sum(p["cred"] for p in prev_map.values())
-            new_active = sum(
-                1 for k, p in cur.items()
-                if p["cred"] > 0 and (k not in prev_map or prev_map[k]["cred"] <= 0)
-            )
-            span = (datetime.date.fromisoformat(d) - datetime.date.fromisoformat(prev_date)).days
-        daily.append({
-            "date": d,
-            "convP": r(conv),
-            "cred": r(cred),
-            "dConvP": None if d_conv is None else r(d_conv),
-            "dCred": None if d_cred is None else r(d_cred),
-            "spanDays": span,
-            "dConvPPerDay": None if d_conv is None or not span else r(d_conv / span),
-            "roster": len(cur),
-            "active": active,
-            "activeConv": active_conv,
-            "newActive": new_active,
-        })
-        prev_map, prev_date = cur, d
-
-    # =====================================================================
-    # 2) 주차별 인실적 (최신 스냅샷)
-    # =====================================================================
-    weeks = []
-    for w in range(5):
-        total = sum(p["weeks"][w] for p in focus_rows)
-        movers = sum(1 for p in focus_rows if p["weeks"][w] > 0)
-        weeks.append({"week": w + 1, "label": f"{w+1}주차", "cred": r(total), "people": movers})
-
-    # =====================================================================
-    # 3) 지사(branch) 롤업
-    # =====================================================================
-    branch_series = defaultdict(dict)   # branchKey -> {date: (conv, cred, active)}
-    for i, d in enumerate(dates):
-        agg = defaultdict(lambda: [0.0, 0.0, 0])
-        for p in per_date[i].values():
-            k = p["branchCode"] or p["branch"]
-            a = agg[k]
-            a[0] += p["convP"]
-            a[1] += p["cred"]
-            a[2] += 1 if p["cred"] > 0 else 0
-        for k, v in agg.items():
-            branch_series[k][d] = v
-
-    branches = []
-    for p in focus_rows:
-        k = p["branchCode"] or p["branch"]
-        if any(b["key"] == k for b in branches):
+        if not s["branches"]:
             continue
-        ser = branch_series.get(k, {})
-        cur = ser.get(dates[-1], [0.0, 0.0, 0])
-        prev = ser.get(dates[-2], [0.0, 0.0, 0]) if len(dates) > 1 else [0.0, 0.0, 0]
-        hc = headcount.get(k, 0)
-        bm = branch_meta.get(k, {})
-        branches.append({
-            "key": k,
-            "branch": p["branch"],
-            "agency": p["agency"],
-            "manager": p["manager"],
-            "headcount": hc,
-            "worldTour": bm.get("worldTour", []),
-            "convP": r(cur[0]),
-            "cred": r(cur[1]),
-            "dConvP": r(cur[0] - prev[0]),
-            "dCred": r(cur[1] - prev[1]),
-            "activePeople": cur[2],
-            "roster": sum(1 for q in focus_rows if (q["branchCode"] or q["branch"]) == k),
-            "activeRate": r(cur[2] / hc * 100, 1) if hc else None,
-            # 인당생산성도 실적 기준. 재적 1명당 천원.
-            "perHead": r(cur[1] / hc, 2) if hc else None,
-            "series": [
-                {"date": d, "convP": r(ser.get(d, [0, 0, 0])[0]), "cred": r(ser.get(d, [0, 0, 0])[1])}
-                for d in dates
-            ],
-        })
-    branches.sort(key=lambda b: -b["cred"])
-    for i, b in enumerate(branches):
-        b["rank"] = i + 1
-
-    # =====================================================================
-    # 4) 설계사 단위
-    # =====================================================================
-    people = []
-    last = per_date[-1]
-    prev = per_date[-2] if len(per_date) > 1 else {}
-    for k, p in last.items():
-        ser = []
-        for i, d in enumerate(dates):
-            q = per_date[i].get(k)
-            ser.append({"date": d, "convP": q["convP"] if q else 0.0, "cred": q["cred"] if q else 0.0})
-        pv = prev.get(k)
-        # 시상금은 개인이 받는 돈이라 사람 단위로만 붙인다.
-        award_items = sorted(
-            (
-                {"label": AWARD_LABEL[key], "money": a["money"]}
-                for key, a in p["awards"].items()
-                if a["money"] > 0
-            ),
-            key=lambda x: -x["money"],
-        )
-        award_money = sum(a["money"] for a in award_items)
-        people.append({
-            "awardItems": award_items,
-            "code": p["code"],
-            "name": p["name"],
-            "branch": p["branch"],
-            "agency": p["agency"],
-            "manager": p["manager"],
-            "convP": p["convP"],
-            "cred": p["cred"],
-            "weeks": p["weeks"],
-            "dConvP": r(p["convP"] - (pv["convP"] if pv else 0.0), 3),
-            "dCred": r(p["cred"] - (pv["cred"] if pv else 0.0), 3),
-            "awardMoney": r(award_money, 0),
-            "prestigeGrade": p["prestige"]["grade"],
-            "series": ser,
-        })
-    people.sort(key=lambda x: -x["cred"])
-    for i, p in enumerate(people):
-        p["rank"] = i + 1
-
-    # =====================================================================
-    # 5) 시상 진척 — 지급 기준선은 전사(수도권마케팅2팀) 데이터에서 역산
-    # =====================================================================
-    awards = []
-    for key, label, *_ in schema.AWARDS:
-        paid_perf = [
-            p["awards"][key]["perf"]
-            for p in latest["people"]
-            if key in p["awards"] and p["awards"][key]["money"] > 0
-        ]
-        threshold = min(paid_perf) if paid_perf else None
-
-        eligible = [p for p in focus_rows if key in p["awards"]]
-        if not eligible:
-            continue
-        achieved = [p for p in eligible if p["awards"][key]["money"] > 0]
-        near = []
-        if threshold:
-            for p in eligible:
-                a = p["awards"][key]
-                if a["money"] > 0:
-                    continue
-                gap = threshold - a["perf"]
-                if 0 < gap <= threshold * 0.5:
-                    near.append({
-                        "name": p["name"], "branch": p["branch"], "manager": p["manager"],
-                        "perf": a["perf"], "gap": r(gap, 3),
-                    })
-            near.sort(key=lambda x: x["gap"])
-        awards.append({
-            "key": key,
-            "label": label,
-            "eligible": len(eligible),
-            "achieved": len(achieved),
-            "rate": r(len(achieved) / len(eligible) * 100, 1) if eligible else 0,
-            "threshold": threshold,
-            "near": near[:20],
-        })
-    # 금액이 아니라 '몇 명이 받는가' 순. 시상금 합산은 의미가 없다.
-    awards.sort(key=lambda a: (-a["achieved"], -len(a["near"])))
-
-    # =====================================================================
-    # 6) 매니저 단위 (담당자별 관리 현황)
-    # =====================================================================
-    mgr = defaultdict(lambda: {"cred": 0.0, "dCred": 0.0, "roster": 0, "active": 0,
-                               "branches": set()})
-    for p in people:
-        m = mgr[p["manager"] or "미지정"]
-        m["cred"] += p["cred"]
-        m["dCred"] += p["dCred"]
-        m["roster"] += 1
-        m["active"] += 1 if p["cred"] > 0 else 0
-        m["branches"].add(p["branch"])
-    managers = [{
-        "manager": k, "cred": r(v["cred"]), "dCred": r(v["dCred"]),
-        "roster": v["roster"], "active": v["active"], "branches": len(v["branches"]),
-        "activeRate": r(v["active"] / v["roster"] * 100, 1) if v["roster"] else 0,
-    } for k, v in mgr.items()]
-    managers.sort(key=lambda x: -x["cred"])
-
-    # =====================================================================
-    # 7) 벤치마크 : 같은 본부의 모든 지점 비교
-    # =====================================================================
-    center_series = defaultdict(dict)
-    center_dept = {}
-    for i, d in enumerate(dates):
-        agg = defaultdict(lambda: [0.0, 0.0, 0, 0])
-        for p in snaps[i]["people"]:
-            c = p["center"]
-            if not c:
+        for b in s["branches"]:
+            if b["hq"] != team:
                 continue
-            a = agg[c]
-            a[0] += p["convP"]
-            a[1] += p["cred"]
-            a[2] += 1
-            a[3] += 1 if p["cred"] > 0 else 0
-            center_dept[c] = p["dept"]
-        for c, v in agg.items():
-            center_series[c][d] = v
+            k = b["branchCode"] or b["branch"]
+            hc_branch[k] = b["headcount"]
+            branch_meta[k] = b
+            hc_center[str(b["centerCode"])] += b["headcount"]
+            hc_dept[str(b["deptCode"])] += b["headcount"]
+        break
 
-    centers = []
-    for c, ser in center_series.items():
-        cur = ser.get(dates[-1], [0.0, 0.0, 0, 0])
-        pv = ser.get(dates[-2], [0.0, 0.0, 0, 0]) if len(dates) > 1 else [0.0, 0.0, 0, 0]
-        hc = sum(b["headcount"] for b in branch_meta.values() if b["center"] == c)
-        centers.append({
-            "center": c,
-            "dept": center_dept.get(c),
-            "cred": r(cur[1]),
-            "dCred": r(cur[1] - pv[1]),
-            "roster": cur[2],
-            "active": cur[3],
-            "headcount": hc,
-            "activeRate": r(cur[3] / hc * 100, 1) if hc else None,
-            "target": targets.get(c),
-            "achievedPct": r(cur[1] / targets[c] * 100, 1) if targets.get(c) else None,
-            "isFocus": c == focus,
-            "series": [
-                {"date": d, "cred": r(ser.get(d, [0, 0, 0, 0])[1])}
-                for d in dates
-            ],
-        })
-    # 절대 실적 순위와 달성률 순위를 둘 다 매긴다. 목표가 지점마다 달라
-    # 절대 실적만으로 줄 세우면 목표가 큰 지점이 무조건 위로 간다.
-    centers.sort(key=lambda x: -x["cred"])
-    for i, c in enumerate(centers):
-        c["rank"] = i + 1
-    ranked = sorted(
-        [c for c in centers if c["achievedPct"] is not None],
-        key=lambda x: -x["achievedPct"],
-    )
-    for i, c in enumerate(ranked):
-        c["achievedRank"] = i + 1
-    for c in centers:
-        c.setdefault("achievedRank", None)
+    per_date = [{(p["code"] or p["name"]): p for p in s["people"]} for s in snaps]
+    ALL = lambda p: True  # noqa: E731
 
-    depts = defaultdict(lambda: {"cred": 0.0, "dCred": 0.0, "roster": 0, "active": 0})
-    for c in centers:
-        dd = depts[c["dept"] or "미지정"]
-        dd["cred"] += c["cred"]
-        dd["dCred"] += c["dCred"]
-        dd["roster"] += c["roster"]
-        dd["active"] += c["active"]
-    dept_list = [{"dept": k, **{kk: r(vv) if isinstance(vv, float) else vv for kk, vv in v.items()}}
-                 for k, v in depts.items()]
-    dept_list.sort(key=lambda x: -x["cred"])
+    # 조직 트리 --------------------------------------------------------------
+    dept_of, center_of = {}, {}
+    for p in latest["people"]:
+        dept_of[str(p["deptCode"])] = p["dept"]
+        center_of[str(p["centerCode"])] = (p["center"], str(p["deptCode"]), p["centerHead"])
 
-    # =====================================================================
-    # 출력
-    # =====================================================================
+    tgt_center = {}
+    for code, (nm, _dc, _h) in center_of.items():
+        if nm in targets:
+            tgt_center[code] = targets[nm]
+    # 영업단 목표 = 소속 센터 목표 합 (전부 있을 때만)
+    tgt_dept = {}
+    for dc in dept_of:
+        cs = [c for c, (_n, d, _h) in center_of.items() if d == dc]
+        if cs and all(c in tgt_center for c in cs):
+            tgt_dept[dc] = sum(tgt_center[c] for c in cs)
+
     out.mkdir(parents=True, exist_ok=True)
-    month = dates[-1][:7]
-    warnings = sorted({w for s in snaps for w in s["warnings"]})
+    shutil.rmtree(out / "dept", ignore_errors=True)
+    shutil.rmtree(out / "center", ignore_errors=True)
+    (out / "dept").mkdir(parents=True, exist_ok=True)
+    (out / "center").mkdir(parents=True, exist_ok=True)
 
-    meta = {
+    # ---------------------------------------------------------------- 팀 ---
+    t_daily = daily_rows(per_date, dates, ALL)
+    depts = rollup(per_date, dates, ALL,
+                   lambda p: (str(p["deptCode"]), p["dept"]), hc_dept, tgt_dept)
+    d_meta = add_stats(depts, dates)
+    for u in depts:
+        u["href"] = f"/dept/{u['key']}"
+        u["centers"] = sum(1 for c, (_n, dc, _h) in center_of.items() if dc == u["key"])
+    depts.sort(key=lambda x: -x["cred"])
+
+    ag_rows, ag_n, ag_conc = agency_rollup(per_date, dates, ALL)
+    team_tgt = sum(tgt_dept.values()) if len(tgt_dept) == len(dept_of) else None
+
+    team_payload = {
+        "level": "team", "name": team, "asOf": dates[-1], "dates": dates,
+        "target": team_tgt, "headcount": sum(hc_dept.values()),
+        "daily": t_daily, "children": depts, "childLabel": "영업단",
+        "compare": d_meta, "agencies": ag_rows, "agencyCount": ag_n,
+        "agencyConcentration": ag_conc,
+        "partialTargets": {"have": len(tgt_dept), "total": len(dept_of)},
+    }
+    (out / "team.json").write_text(json.dumps(team_payload, ensure_ascii=False), encoding="utf-8")
+
+    # ------------------------------------------------------------ 영업단 ---
+    for dc, dname in dept_of.items():
+        keep = lambda p, _d=dc: str(p["deptCode"]) == _d  # noqa: E731
+        centers = rollup(per_date, dates, keep,
+                         lambda p: (str(p["centerCode"]), p["center"]), hc_center, tgt_center)
+        c_meta = add_stats(centers, dates)
+        for u in centers:
+            u["href"] = f"/center/{u['key']}"
+            u["head"] = center_of.get(u["key"], ("", "", ""))[2]
+        centers.sort(key=lambda x: -x["cred"])
+        a_rows, a_n, a_conc = agency_rollup(per_date, dates, keep, top=12)
+        b_rows, b_n = top_branches(per_date, dates, keep, hc_branch, top=15)
+        (out / "dept" / f"{dc}.json").write_text(json.dumps({
+            "level": "dept", "key": dc, "name": dname, "asOf": dates[-1], "dates": dates,
+            "parent": {"name": team, "href": "/"},
+            "target": tgt_dept.get(dc), "headcount": hc_dept.get(dc, 0),
+            "daily": daily_rows(per_date, dates, keep),
+            "children": centers, "childLabel": "센터", "compare": c_meta,
+            "agencies": a_rows, "agencyCount": a_n, "agencyConcentration": a_conc,
+            "branches": b_rows, "branchCount": b_n,
+            "siblings": [{"key": u["key"], "name": u["name"], "href": u["href"]} for u in depts],
+        }, ensure_ascii=False), encoding="utf-8")
+
+    # -------------------------------------------------------------- 센터 ---
+    for cc, (cname, dc, head) in center_of.items():
+        keep = lambda p, _c=cc: str(p["centerCode"]) == _c  # noqa: E731
+        branches = rollup(per_date, dates, keep,
+                          lambda p: (p["branchCode"] or p["branch"], p["branch"]), hc_branch)
+        b_meta = add_stats(branches, dates)
+        for u in branches:
+            bm = branch_meta.get(int(u["key"]) if u["key"].isdigit() else u["key"], {})
+            u["agency"] = bm.get("agency")
+            u["worldTour"] = bm.get("worldTour", [])
+        branches.sort(key=lambda x: -x["cred"])
+        weeks, people, awards, managers = center_detail(
+            snaps, dates, per_date, cname, hc_branch, branch_meta)
+        sib = [{"key": c, "name": n, "href": f"/center/{c}"}
+               for c, (n, d, _h) in center_of.items() if d == dc]
+        (out / "center" / f"{cc}.json").write_text(json.dumps({
+            "level": "center", "key": cc, "name": cname, "head": head,
+            "asOf": dates[-1], "dates": dates,
+            "parent": {"name": dept_of.get(dc, ""), "href": f"/dept/{dc}"},
+            "grandparent": {"name": team, "href": "/"},
+            "target": tgt_center.get(cc), "headcount": hc_center.get(cc, 0),
+            "daily": daily_rows(per_date, dates, keep),
+            "children": branches, "childLabel": "지사", "compare": b_meta,
+            "weeks": weeks, "people": people, "awards": awards, "managers": managers,
+            "siblings": sorted(sib, key=lambda x: x["name"]),
+        }, ensure_ascii=False), encoding="utf-8")
+
+    # -------------------------------------------------------------- 색인 ---
+    (out / "index.json").write_text(json.dumps({
         "generatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
-        "asOf": dates[-1],
-        "month": month,
-        "focus": focus_info,
-        "snapshots": [{"date": s["asOf"], "source": s["source"], "rows": len(s["people"])} for s in snaps],
-        "warnings": warnings,
-        "metrics": {
-            "cred": {
-                "label": "실적",
-                "unit": "천원",
-                "desc": "원본 '인실적' 컬럼. 월 누적, 단위는 천원. 매출의 유일한 기준",
-            },
-        },
-    }
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        "asOf": dates[-1], "month": dates[-1][:7], "team": team,
+        "snapshots": [{"date": s["asOf"], "source": s["source"], "rows": len(s["people"])}
+                      for s in snaps],
+        "warnings": sorted({w for s in snaps for w in s["warnings"]}),
+        "tree": [{
+            "key": u["key"], "name": u["name"], "href": u["href"],
+            "centers": sorted(
+                ({"key": c, "name": n, "href": f"/center/{c}"}
+                 for c, (n, d, _h) in center_of.items() if d == u["key"]),
+                key=lambda x: x["name"]),
+        } for u in depts],
+        "focus": next((c for c, (n, _d, _h) in center_of.items() if n == FOCUS_CENTER), None),
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    center_payload = {
-        "focus": focus_info,
-        "asOf": dates[-1],
-        "target": targets.get(focus),
-        "dates": dates,
-        "daily": daily,
-        "weeks": weeks,
-        "branches": branches,
-        "people": people,
-        "awards": awards,
-        "managers": managers,
-        "headcount": sum(b["headcount"] for b in branch_meta.values() if b["center"] == focus),
-    }
-    (out / "center.json").write_text(json.dumps(center_payload, ensure_ascii=False), encoding="utf-8")
-
-    (out / "benchmark.json").write_text(json.dumps(
-        {"asOf": dates[-1], "dates": dates, "centers": centers, "depts": dept_list},
-        ensure_ascii=False), encoding="utf-8")
-
+    n = lambda p: sum(1 for _ in p)  # noqa: E731
     print(f"\n✓ {out}")
-    for f in ("meta.json", "center.json", "benchmark.json"):
-        print(f"   {f:16} {(out / f).stat().st_size/1024:8.1f} KB")
-    if warnings:
-        print("\n⚠ 레이아웃 경고")
-        for w in warnings:
-            print("   -", w)
+    print(f"   index.json + team.json + dept/{len(dept_of)}개 + center/{len(center_of)}개")
+    tot = sum(f.stat().st_size for f in out.rglob("*.json"))
+    print(f"   총 {tot/1024:.0f} KB")
+    if team_payload["partialTargets"]["have"] < team_payload["partialTargets"]["total"]:
+        h, t = team_payload["partialTargets"].values()
+        print(f"   ! 목표가 등록된 영업단 {h}/{t} — 나머지는 인당생산성으로 비교")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", type=Path, default=DEFAULT_SRC)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    ap.add_argument("--focus", default=FOCUS_CENTER)
     a = ap.parse_args()
-    build(a.src, a.out, a.focus)
+    build(a.src, a.out)
