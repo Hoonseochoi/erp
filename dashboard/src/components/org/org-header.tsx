@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
+import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { latestDelta, pace } from "@/lib/analytics";
 import { m, md, mdw, n, pct, won, wonSigned } from "@/lib/format";
 import type { OrgBase } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { MetricDetail, type MetricKey } from "./metric-detail";
 
 /** 층에 상관없이 같은 KPI 묶음. 목표가 없으면 달성률 자리를 인당생산성이 대신한다. */
 export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string }) {
@@ -18,6 +20,8 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
   const p = pace(data.asOf, last.cred, data.target);
   const activeRate = data.headcount ? (last.active / data.headcount) * 100 : null;
   const perCapita = data.headcount ? last.cred / data.headcount : null;
+  const [metric, setMetric] = React.useState<MetricKey | null>(null);
+  const hasChildren = data.children.length > 0;
 
   return (
     <motion.div initial={{ y: 10 }} animate={{ y: 0 }} transition={{ duration: 0.3 }}>
@@ -41,33 +45,44 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
         <Tile label="당월 누적 실적" value={m(last.cred)} unit="만원"
           delta={dl?.dCred ?? null}
           deltaLabel={`${wonSigned(dl?.dCred)} (${md(data.asOf)})`}
-          spark={data.daily.map((d) => d.cred)} />
+          spark={data.daily.map((d) => d.cred)}
+          onClick={hasChildren ? () => setMetric("cred") : undefined} />
 
         {p.achievedPct !== null ? (
           <Tile label="목표 달성률" value={p.achievedPct.toFixed(1)} unit="%"
             delta={p.gapPp}
             deltaLabel={`영업일 진척 대비 ${p.gapPp! >= 0 ? "+" : ""}${p.gapPp!.toFixed(1)}%p`}
-            sub={`남은 ${won(p.remaining)}원`} />
+            sub={`남은 ${won(p.remaining)}원`}
+            onClick={hasChildren ? () => setMetric("compare") : undefined} />
         ) : (
           <Tile label="인당 생산성" value={perCapita ? m(perCapita * 10) : "—"} unit="만원/명"
-            sub="재적 1인당" />
+            sub="재적 1인당"
+            onClick={hasChildren ? () => setMetric("compare") : undefined} />
         )}
 
         <Tile label="월말 예상" value={m(p.projected)} unit="만원"
           sub={p.projectedPct !== null
             ? `목표의 ${p.projectedPct.toFixed(0)}%`
-            : `영업일 평균 ${won(p.perDay)}원`} />
+            : `영업일 평균 ${won(p.perDay)}원`}
+          onClick={hasChildren ? () => setMetric("projected") : undefined} />
 
         <Tile label={`${md(data.asOf)} 실적`} value={m(dl?.dCred ?? 0)} unit="만원"
           sub={`구간 평균 ${won(avgPerDay)}원`}
           spark={data.daily.filter((d) => d.dCred !== null).map((d) => d.dCred!)}
-          sparkColor="var(--series-3)" />
+          sparkColor="var(--series-3)"
+          onClick={hasChildren ? () => setMetric("today") : undefined} />
 
         <Tile label="가동 인원" value={n(last.active)} unit={`명 / ${n(data.headcount)}명`}
           delta={dl?.newActive ?? null} deltaLabel={`신규 ${dl?.newActive ?? 0}명`}
           sub={activeRate !== null ? `가동률 ${pct(activeRate)}` : undefined}
-          spark={data.daily.map((d) => d.active)} sparkColor="var(--series-2)" />
+          spark={data.daily.map((d) => d.active)} sparkColor="var(--series-2)"
+          onClick={hasChildren ? () => setMetric("active") : undefined} />
       </div>
+
+      {hasChildren && (
+        <MetricDetail metric={metric} open={metric !== null}
+          onOpenChange={(v) => !v && setMetric(null)} data={data} />
+      )}
 
       {data.target && (
         <Card className="mt-3">
@@ -102,14 +117,27 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
 }
 
 function Tile({
-  label, value, unit, sub, delta, deltaLabel, spark, sparkColor,
+  label, value, unit, sub, delta, deltaLabel, spark, sparkColor, onClick,
 }: {
   label: string; value: string; unit?: string; sub?: React.ReactNode;
   delta?: number | null; deltaLabel?: string; spark?: number[]; sparkColor?: string;
+  /** 있으면 카드 전체가 눌러진다 — 자식 조직 기준 상세를 연다 */
+  onClick?: () => void;
 }) {
   const dir = delta === null || delta === undefined ? null : Math.sign(delta);
   return (
-    <Card className="h-full p-4">
+    <Card
+      className={cn(
+        "h-full p-4",
+        onClick && "cursor-pointer transition-colors hover:border-foreground/30 hover:bg-muted/40",
+      )}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
+      } : undefined}
+    >
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs text-muted-foreground">{label}</span>
         {spark && spark.length > 1 && <Sparkline values={spark} color={sparkColor} />}

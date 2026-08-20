@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
 import {
@@ -17,6 +16,7 @@ import {
 import { LEVEL_COLOR } from "@/lib/analytics";
 import { m, man, md, n, pct } from "@/lib/format";
 import type { Compare } from "@/lib/types";
+import { ClickableRow } from "./clickable-row";
 import type { Diagnosed } from "./deviation";
 
 const LINE = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
@@ -182,19 +182,16 @@ export function ChildrenPanel({
                     </TableCell>
                   </>
                 );
-                if (!showLinks || !u.href) {
-                  return <TableRow key={u.key}>{cells}</TableRow>;
-                }
+                const href = showLinks ? u.href : undefined;
                 return (
-                  <TableRow key={u.key} className="cursor-pointer">
+                  <ClickableRow key={u.key} href={href}>
                     {cells}
-                    <TableCell className="pr-4">
-                      <Link href={u.href} className="flex items-center justify-end"
-                        aria-label={`${u.name} 상세`}>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </Link>
-                    </TableCell>
-                  </TableRow>
+                    {showLinks && (
+                      <TableCell className="pr-4">
+                        {u.href && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                      </TableCell>
+                    )}
+                  </ClickableRow>
                 );
               })}
             </TableBody>
