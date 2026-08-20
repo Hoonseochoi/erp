@@ -16,6 +16,7 @@ import { Legend, RankBarChart, type SimpleDatum } from "@/components/charts/char
 import { LEVEL_COLOR, LEVEL_LABEL, diagnose, unitPace, type Level } from "@/lib/analytics";
 import { m, pct, won } from "@/lib/format";
 import type { Compare, Unit } from "@/lib/types";
+import { HelpTip } from "./help-tip";
 
 export type Diagnosed = Unit & {
   level: Level;
@@ -87,6 +88,13 @@ export function Deviation({
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold">궤도 진단</h3>
+        <HelpTip title="궤도 진단, 어떻게 읽나" width="w-80 sm:w-96">
+          <DeviationGuide label={label} compare={compare} />
+        </HelpTip>
+      </div>
+
       <div className="grid grid-cols-3 gap-3">
         <Count icon={<AlertTriangle className="h-3.5 w-3.5" />} level="alert"
           n={counts.alert} total={units.length} />
@@ -151,6 +159,72 @@ export function Deviation({
         </Card>
       </div>
     </div>
+  );
+}
+
+/** 궤도 진단 설명 팝오버 내용. 지금 보고 있는 화면의 잣대(compare)에 맞춰 문구가 바뀐다. */
+function DeviationGuide({ label, compare }: { label: string; compare: Compare }) {
+  const metricName = compare.field === "achievedPct" ? "달성률" : "인당생산성";
+  return (
+    <>
+      <p>
+        {label} 가운데 <b>정상 궤도를 벗어난 곳</b>을 찾아내는 화면이다.
+        세 가지 신호를 겹쳐서 본다.
+      </p>
+
+      <div>
+        <p><b>① 동료 대비 편차 (z-score)</b></p>
+        <p>
+          지금은 <b>{metricName}</b> 기준. {compare.field === "achievedPct"
+            ? "목표가 등록돼 있어 달성률로 비교한다."
+            : "목표가 없는 조직이 있어 재적 1인당 실적(인당생산성)으로 대신 비교한다."}
+        </p>
+        <p>
+          평균이 아니라 <b>중앙값</b>을 기준점으로 쓴다. {label} 수가 적으면
+          유난히 크거나 작은 곳 하나가 평균을 끌고 가버려서, 정작 그 이상치가
+          &ldquo;정상&rdquo;처럼 보이게 된다. 중앙값은 그런 왜곡에 덜 흔들린다.
+        </p>
+        <p>
+          <b>z = (내 값 − 중앙값) ÷ MAD</b>. 0이면 딱 중앙, 음수면 중앙보다 낮은 쪽.
+          <b> −2 이하는 확실한 이탈</b>, −1.5 이하는 주의로 본다.
+        </p>
+      </div>
+
+      <div>
+        <p><b>② 모멘텀 (속도)</b></p>
+        <p>
+          <b>최근 3일 평균 ÷ 그 이전 3일 평균</b>. 1.0이면 속도 유지, 1.3이면 30% 빨라진 것,
+          0.7이면 30% 느려진 것. <b>0.7 미만은 이탈, 0.9 미만은 주의</b>로 본다.
+          지금 값이 나쁘지 않아도 속도가 꺾이는 중이면 먼저 잡힌다.
+        </p>
+      </div>
+
+      <div>
+        <p><b>③ 목표 페이스</b></p>
+        <p>
+          목표가 등록된 {label}에만 적용. <b>달성률 − 영업일 진척률</b>.
+          영업일이 절반 지났는데 달성률이 그에 못 미치면 마이너스가 된다.
+          <b> −15%p 이하는 이탈, −7%p 이하는 주의.</b>
+        </p>
+      </div>
+
+      <div>
+        <p><b>등급 판정</b></p>
+        <p>
+          세 신호 중 <b>하나라도</b> 이탈 기준을 넘으면 이탈, 주의 기준을 넘으면 주의로
+          표시한다. 근거는 이탈·주의 카드에 배지로 함께 뜬다 — 이유 없는 경고는 없다.
+        </p>
+      </div>
+
+      <div>
+        <p><b>편차 × 속도 그래프 읽는 법</b></p>
+        <p>
+          가로축이 편차(z), 세로축이 속도(모멘텀). <b>왼쪽 아래(옅은 빨간 영역)</b>가
+          가장 위험하다 — 동료보다 낮은데 그마저 더 느려지는 중이라는 뜻.
+          오른쪽 위는 잘하면서 가속까지 붙은 곳.
+        </p>
+      </div>
+    </>
   );
 }
 

@@ -41,12 +41,50 @@ def excel_date(v):
 
 
 # --------------------------------------------------------------------------
+# 암호 해제 (두 포맷 공통)
+# --------------------------------------------------------------------------
+def _opened(path: Path):
+    """암호가 걸려 있으면 해제해서 BytesIO 로, 아니면 그대로 파일 핸들을 연다.
+
+    같은 '설계사시상 진척현황' 이름이라도 어느 날은 평문 .xlsb, 어느 날은
+    암호 걸린 .xlsb(구형 .xlsx 와 같은 OLE2 CFB 컨테이너)로 온다.
+    확장자로 판단하지 않고 msoffcrypto 의 is_encrypted() 로 실제 상태를 본다.
+    """
+    import msoffcrypto
+
+    fh = open(path, "rb")
+    try:
+        office = msoffcrypto.OfficeFile(fh)
+        if not office.is_encrypted():
+            fh.seek(0)
+            return fh
+    except Exception:
+        # 암호 여부 판별 자체가 실패하면(=이 포맷이 아니면) 원본 그대로 읽는다.
+        fh.seek(0)
+        return fh
+
+    for pw in PASSWORDS:
+        try:
+            office.load_key(password=pw)
+            buf = io.BytesIO()
+            office.decrypt(buf)
+            buf.seek(0)
+            fh.close()
+            return buf
+        except Exception:
+            continue
+    fh.close()
+    raise RuntimeError(f"암호 해제 실패: {path.name}")
+
+
+# --------------------------------------------------------------------------
 # 포맷별 raw 행 읽기 : [{col_index: value}, ...]
 # --------------------------------------------------------------------------
 def _rows_xlsb(path: Path, sheet: str):
     from pyxlsb import open_workbook
 
-    wb = open_workbook(str(path))
+    src = _opened(path)
+    wb = open_workbook(src)
     if sheet not in wb.sheets:
         return None
     out = []
@@ -57,29 +95,9 @@ def _rows_xlsb(path: Path, sheet: str):
 
 
 def _rows_xlsx(path: Path, sheet: str):
-    import msoffcrypto
     from openpyxl import load_workbook
 
-    with open(path, "rb") as fh:
-        try:
-            office = msoffcrypto.OfficeFile(fh)
-            buf = io.BytesIO()
-            for pw in PASSWORDS:
-                try:
-                    office.load_key(password=pw)
-                    office.decrypt(buf)
-                    break
-                except Exception:
-                    buf = io.BytesIO()
-                    continue
-            else:
-                raise RuntimeError(f"암호 해제 실패: {path.name}")
-            buf.seek(0)
-            src = buf
-        except Exception:
-            fh.seek(0)
-            src = io.BytesIO(fh.read())
-
+    src = _opened(path)
     wb = load_workbook(src, read_only=True, data_only=True)
     if sheet not in wb.sheetnames:
         wb.close()
