@@ -10,6 +10,7 @@ import {
 } from "@/components/charts/chart-kit";
 import { latestDelta, pace } from "@/lib/analytics";
 import { isWeekend, m, man, md, mdw, pct, won, wonSigned } from "@/lib/format";
+import { HelpTip } from "./help-tip";
 import type { OrgBase } from "@/lib/types";
 
 /** 일간 실적 · 누적/예상 — 층에 상관없이 동일. */
@@ -64,8 +65,18 @@ export function Trend({ data }: { data: OrgBase }) {
       <Card>
         <CardHeader>
           <CardTitle>일간 실적 (만원)</CardTitle>
-          <CardDescription>
-            스냅샷 간 누적 차이. 파일이 없는 날은 구간으로 합쳐지며 툴팁에 일평균이 나온다.
+          <CardDescription className="flex items-center gap-1.5">
+            스냅샷 차분
+            <HelpTip title="일간 실적은 어떻게 나오나" width="w-72">
+              <p>
+                원본 파일에는 <b>월 누적</b>만 있고 &ldquo;오늘 얼마&rdquo;는 없다.
+                어제 파일과 빼서 복원한 값이다.
+              </p>
+              <p>
+                파일이 없는 날(주말·휴일)은 그 구간이 <b>한 막대에 합쳐진다.</b>
+                막대에 마우스를 올리면 며칠치인지와 일평균이 나온다.
+              </p>
+            </HelpTip>
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -89,8 +100,15 @@ export function Trend({ data }: { data: OrgBase }) {
       <Card>
         <CardHeader>
           <CardTitle>누적 추이 · 월말 예상 (만원)</CardTitle>
-          <CardDescription>
-            영업일(월~금) 기준 run-rate 로 월말을 환산. 주말은 실적일로 세지 않는다.
+          <CardDescription className="flex items-center gap-1.5">
+            영업일 기준 환산
+            <HelpTip title="월말 예상 계산법" width="w-72">
+              <p>
+                <b>누적 ÷ 경과 영업일 × 총 영업일</b>.
+                주말을 실적일로 세면 과소평가되므로 월~금만 센다.
+              </p>
+              <p>공휴일은 아직 빼지 않는다.</p>
+            </HelpTip>
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -116,9 +134,7 @@ export function Trend({ data }: { data: OrgBase }) {
       <Card>
         <CardHeader>
           <CardTitle>신규 가동 인원</CardTitle>
-          <CardDescription>
-            그날 처음으로 당월 실적이 잡힌 설계사 수. 가동 촉진 활동의 직접 지표.
-          </CardDescription>
+          <CardDescription>그날 처음 당월 실적이 잡힌 설계사 수</CardDescription>
         </CardHeader>
         <CardContent>
           <ColumnChart data={newActive} unit="명" height={200} color="var(--series-3)" />

@@ -13,17 +13,16 @@ import { Progress } from "@/components/ui/progress";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import {
-  ColumnChart, CumulativeChart, Legend, Sparkline, type SimpleDatum,
-} from "@/components/charts/chart-kit";
+import { CumulativeChart, Sparkline } from "@/components/charts/chart-kit";
 import { OrgNav } from "./org-nav";
 import { OrgHeader } from "./org-header";
 import { Trend } from "./trend";
 import { Deviation, diagnoseAll } from "./deviation";
+import { WeekPacePanel } from "./week-pace";
 import { ChildrenPanel } from "./children-table";
 import { TabsShell } from "./tabs-shell";
 import { awardEarners, movers, paretoCurve, paretoShare } from "@/lib/analytics";
-import { m, man, md, n, pct, won } from "@/lib/format";
+import { m, md, n, pct, won } from "@/lib/format";
 import type { CenterData, IndexData, PersonRow } from "@/lib/types";
 
 export function CenterView({ data, index }: { data: CenterData; index: IndexData }) {
@@ -40,14 +39,19 @@ export function CenterView({ data, index }: { data: CenterData; index: IndexData
 
       <div className="pt-7">
         <OrgHeader data={data}
-          subtitle={`${data.parent.name} · 지점장 ${data.head} · 지사 ${data.children.length}개 · 실적 설계사 ${data.people.length}명`} />
+          subtitle={`${data.parent.name} · 센터장 ${data.head} · 지사 ${data.children.length}개 · 실적 설계사 ${data.people.length}명`} />
 
         <TabsShell panes={[
-          { id: "trend", label: "추이", node: <><Trend data={data} /><Weeks data={data} /></> },
+          { id: "trend", label: "추이", node: <Trend data={data} /> },
           {
             id: "diag", label: "궤도 진단",
-            node: <Deviation units={units} compare={data.compare}
-              label="지사" asOf={data.asOf} />,
+            node: (
+              <div className="space-y-8">
+                <WeekPacePanel weeks={data.weeks} pace={data.weekPace} />
+                <Deviation units={units} compare={data.compare}
+                  label="지사" asOf={data.asOf} />
+              </div>
+            ),
           },
           {
             id: "branch", label: "지사",
@@ -60,37 +64,6 @@ export function CenterView({ data, index }: { data: CenterData; index: IndexData
         ]} />
       </div>
     </div>
-  );
-}
-
-function Weeks({ data }: { data: CenterData }) {
-  const running = Math.max(...data.weeks.filter((w) => w.cred > 0).map((w) => w.week), 0);
-  const bars: SimpleDatum[] = data.weeks.map((w) => ({
-    x: w.label, y: man(w.cred), title: `${w.label} 실적`,
-    highlight: w.week === running,
-    extra: [{ label: "실적 발생", value: `${w.people}명` }],
-  }));
-  return (
-    <Card className="mt-3">
-      <CardHeader>
-        <CardTitle>주차별 실적 (만원)</CardTitle>
-        <CardDescription>원본이 주차 컬럼을 직접 제공한다. 주차 시상의 마감 기준.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ColumnChart data={bars} unit="만원" height={200} />
-        <Legend items={[
-          { label: "마감된 주차", color: "var(--series-1)" },
-          { label: "진행 중", color: "var(--series-2)" },
-        ]} />
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {data.weeks.map((w) => (
-            <Badge key={w.week} variant={w.cred > 0 ? "secondary" : "muted"}>
-              {w.label} {won(w.cred)}원 · {w.people}명
-            </Badge>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

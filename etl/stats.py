@@ -152,3 +152,16 @@ def diagnose(unit, peers_z_field="perCapita", pace_gap=None, mom=None, z=None):
         elif mom >= 1.2:
             flags.append(f"속도 {mom:.2f}배")
     return {"level": level, "flags": flags}
+
+
+def business_days(start, end):
+    """월~금 일수. 시작·종료일 모두 포함. 공휴일은 아직 반영하지 않는다."""
+    import datetime
+    if end < start:
+        return 0
+    n, cur = 0, start
+    while cur <= end:
+        if cur.weekday() < 5:
+            n += 1
+        cur += datetime.timedelta(days=1)
+    return n

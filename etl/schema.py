@@ -17,7 +17,7 @@ COL = {
     "dept_code": 4,
     "center": 5,         # 지점명   (예: 경인.GA7센터)  ← 조직 분석의 기본 단위
     "center_code": 6,
-    "center_head": 7,    # 지점장
+    "center_head": 7,    # 센터장
     "dept_order": 8,
     "agency": 9,         # 소속대리점명 (GA 법인)
     "agency_code": 10,
@@ -49,33 +49,45 @@ HEADER_CHECK = [
     (16, "환산P"),
 ]
 
-# --- 시상 항목 --------------------------------------------------------------
-# (키, 표시명, 운영여부 컬럼, [실적 컬럼...], 시상금 컬럼)
-# 실적 컬럼이 여러 개인 항목은 "월별/주차별 누적을 각각 채운 뒤 합산 판정"하는 구조.
-AWARDS = [
-    ("world_tour",   "26.7~9월 월드투어",      23, [24, 25, 26], 27),
-    ("cont_78",      "26.7~8월 연속가동",      28, [29, 30],     31),
-    ("cont_78_plus", "26.7~8월 연속가동 추가", 32, [33, 34],     35),
-    ("w1_person",    "1주차(인)",              36, [37],         38),
-    ("w1_person_ex", "1주차(인추가)",          39, [40],         41),
-    ("w1_main",      "1주차(주력)",            42, [43],         44),
-    ("w2_person",    "2주차(인)",              45, [46],         47),
-    ("w2_new",       "2주차(신상품)",          48, [49],         50),
-    ("w2_target9",   "2주차_타겟9점",          51, [52],         53),
-    ("w3_person",    "3주차(인)",              54, [55],         56),
-    ("w3_main",      "3주차(주력)",            57, [58],         59),
-    ("w3_new",       "3주차(신상품)",          60, [61],         62),
-    ("w34_cont",     "3~4주 연속가동",         63, [64, 65],     66),
-    ("w3_target17",  "3주차_타겟17점",         67, [68],         69),
-    ("w4_person",    "4주차(인)",              70, [71],         72),
-    ("w4_main",      "4주차(주력)",            73, [74],         75),
-    ("w4_new",       "4주차(신상품)",          76, [77],         78),
-    ("cont_78_full", "7~8월 연속가동",         79, [80],         81),
-    ("world_trip",   "7~9월 월드투어 여행",    82, [83],         84),
-    ("w5_person",    "5주차(인)",              85, [86],         87),
-    ("w5_new",       "5주차(신상품)",          88, [89],         90),
-    ("cont_78_add",  "7~8월 연속가동 추가",    91, [92],         93),
-]
+# --- 시상 항목 ---------------------------------------------------------------
+# 매달 항목이 바뀐다(8월 중에도 2주차 항목이 빠지고 3주차가 앞당겨졌다).
+# 하드코딩하면 컬럼이 밀려 엉뚱한 이름으로 읽히므로 헤더에서 직접 뽑는다.
+#
+# 구조: row5 에 항목명(병합), row6 에 [운영 | ...실적 | 計] 이 반복된다.
+AWARD_SCAN = (23, 94)          # 시상 블록 범위 (프레스티지클럽 직전까지)
+
+
+def parse_awards(rows):
+    """헤더에서 시상 항목 정의를 읽어낸다.
+
+    반환: [{"key","label","flag","perf":[col...],"money","window"}]
+    window 은 '8.18~23일' 같은 원본 표기 그대로.
+    """
+    r5, r6, r7 = rows[5], rows[6], rows[7]
+    out, name, cur = [], None, None
+    for c in range(*AWARD_SCAN):
+        v5 = r5.get(c)
+        if v5 is not None:
+            name = v5.strip() if isinstance(v5, str) and v5.strip() else None
+            cur = None
+        if name is None:
+            continue
+        sub = str(r6.get(c) or "").strip()
+        if sub == "운영":
+            cur = {"key": name, "label": name, "flag": c,
+                   "perf": [], "money": None, "window": None}
+            out.append(cur)
+        elif cur is None:
+            continue
+        elif "실적" in sub:
+            cur["perf"].append(c)
+            w = r7.get(c)
+            if cur["window"] is None and isinstance(w, str) and "~" in w:
+                cur["window"] = w.strip()
+        elif sub in ("計", "계"):
+            cur["money"] = c
+    return [g for g in out if g["money"] is not None and g["perf"]]
+
 
 PRESTIGE = {"flag": 94, "m7": 95, "m8": 96, "m9": 97, "grade": 98}
 PREMIER = {"target": 99, "m7": 100, "m8": 101, "m9": 102, "m10": 103, "m11": 104,

@@ -143,6 +143,8 @@ def parse_snapshot(path: Path):
         if got != text:
             warnings.append(f"헤더 불일치 col{idx}: 기대 '{text}' / 실제 '{got}'")
 
+    awards_def = schema.parse_awards(rows)
+
     C = schema.COL
     people = []
     for r in rows[8:]:
@@ -166,13 +168,12 @@ def parse_snapshot(path: Path):
             "weeks": [round(num(r.get(c)), 3) for c in schema.WEEK_COLS],
         }
         awards = {}
-        for key, _label, flag_col, perf_cols, money_col in schema.AWARDS:
-            flag = num(r.get(flag_col))
-            if not flag:
+        for a in awards_def:
+            if not num(r.get(a["flag"])):
                 continue
-            awards[key] = {
-                "perf": round(sum(num(r.get(c)) for c in perf_cols), 3),
-                "money": round(num(r.get(money_col)), 1),
+            awards[a["key"]] = {
+                "perf": round(sum(num(r.get(c)) for c in a["perf"]), 3),
+                "money": round(num(r.get(a["money"])), 1),
             }
         rec["awards"] = awards
         rec["prestige"] = {
@@ -220,6 +221,8 @@ def parse_snapshot(path: Path):
         "asOf": as_of.isoformat() if as_of else None,
         "source": path.name,
         "warnings": warnings,
+        "awardDefs": [{"key": a["key"], "label": a["label"], "window": a["window"]}
+                      for a in awards_def],
         "people": people,
         "branches": branches,
     }

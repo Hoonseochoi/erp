@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import re
 import shutil
 import sys
 from collections import defaultdict
@@ -51,7 +52,9 @@ DEFAULT_OUT = ROOT / "dashboard" / "data"
 TARGETS_FILE = HERE / "targets.json"
 
 FOCUS_CENTER = "경인.GA7센터"
-AWARD_LABEL = {k: label for k, label, *_ in schema.AWARDS}
+
+# 실적 구간 코호트. 원본 단위가 천원이라 100 = 10만원.
+TIERS = [(100, "10만 가동"), (200, "20만 가동")]
 
 
 def r(x, n=1):
@@ -181,6 +184,122 @@ def agency_rollup(per_date, dates, keep, top=15):
     return rows[:top], len(rows), stats.concentration([v[0] for v in agg.values()])
 
 
+def week_windows(latest, month):
+    """주차별 날짜 구간을 원본 시상 헤더에서 읽는다.
+
+    '1주차(인)' 항목의 실적 컬럼 헤더가 '8.1~9일' 처럼 구간을 그대로 담고 있다.
+    주차 경계가 매달 다르고 균등하지도 않아서(8월은 9일·8일·6일) 계산으로
+    맞히려 하지 않고 파일이 말하는 값을 쓴다.
+    """
+    y, mo = int(month[:4]), int(month[5:7])
+    found = {}
+    for a in latest.get("awardDefs", []):
+        m = re.match(r"(\d+)주차", str(a["label"]))
+        w = a.get("window")
+        if not m or not w or int(m[1]) in found:
+            continue
+        g = re.match(r"(\d+)\.(\d+)\s*~\s*(?:(\d+)\.)?(\d+)", w)
+        if not g:
+            continue
+        m1, d1, m2, d2 = int(g[1]), int(g[2]), int(g[3] or g[1]), int(g[4])
+        if m1 != mo:
+            continue
+        found[int(m[1])] = (datetime.date(y, m1, d1), datetime.date(y, m2, d2))
+    return found
+
+
+def week_rows(latest, keep, windows, as_of):
+    """주차별 실적 + 그 주차의 영업일 진척."""
+    rows = [p for p in latest["people"] if keep(p)]
+    today = datetime.date.fromisoformat(as_of)
+    out = []
+    for w in range(5):
+        span = windows.get(w + 1)
+        total = biz = None
+        state = "none"
+        if span:
+            lo, hi = span
+            total = stats.business_days(lo, hi)
+            if today > hi:
+                biz, state = total, "done"
+            elif today >= lo:
+                # 스냅샷은 전일 마감 기준이라 today 하루 전까지가 반영분이다.
+                biz = stats.business_days(lo, today - datetime.timedelta(days=1))
+                state = "running"
+            else:
+                biz, state = 0, "upcoming"
+        cred = sum(p["weeks"][w] for p in rows)
+        out.append({
+            "week": w + 1, "label": f"{w+1}주차",
+            "cred": r(cred),
+            "people": sum(1 for p in rows if p["weeks"][w] > 0),
+            "from": span[0].isoformat() if span else None,
+            "to": span[1].isoformat() if span else None,
+            "bizDays": biz, "totalBizDays": total, "state": state,
+        })
+    return out
+
+
+def week_pace(weeks):
+    """진행 중인 주차가 앞선 주차 대비 어느 정도 속도인지.
+
+    비교 잣대는 '영업일당 실적'이다. 주차마다 영업일 수가 달라서(9일·8일·6일)
+    주차 총액을 그대로 비교하면 짧은 주차가 무조건 나빠 보인다.
+    """
+    done = [w for w in weeks if w["state"] == "done" and w["totalBizDays"]]
+    cur = next((w for w in weeks if w["state"] == "running"), None)
+    if not done:
+        return None
+
+    rates = [w["cred"] / w["totalBizDays"] for w in done]
+    base = sum(rates) / len(rates)
+    prev_rate = rates[-1]
+
+    out = {
+        "done": [{"week": w["week"], "cred": r(w["cred"]),
+                  "bizDays": w["totalBizDays"],
+                  "perDay": r(w["cred"] / w["totalBizDays"])} for w in done],
+        "baselinePerDay": r(base),
+        "prevPerDay": r(prev_rate),
+        "current": None,
+    }
+    if cur and cur["bizDays"]:
+        expected_now = base * cur["bizDays"]
+        out["current"] = {
+            "week": cur["week"],
+            "cred": r(cur["cred"]),
+            "bizDays": cur["bizDays"],
+            "totalBizDays": cur["totalBizDays"],
+            "perDay": r(cur["cred"] / cur["bizDays"]),
+            "expectedNow": r(expected_now),
+            "expectedFull": r(base * cur["totalBizDays"]) if cur["totalBizDays"] else None,
+            "projected": r(cur["cred"] / cur["bizDays"] * cur["totalBizDays"])
+            if cur["totalBizDays"] else None,
+            "paceRatio": r(cur["cred"] / expected_now, 3) if expected_now else None,
+        }
+    return out
+
+
+def tier_cohorts(latest, keep, limit=1000):
+    """실적 구간별 대상자. 10만/20만 가동은 현장에서 바로 쓰는 관리 단위다."""
+    rows = sorted((p for p in latest["people"] if keep(p)), key=lambda p: -p["cred"])
+    out = []
+    for thr, label in TIERS:
+        hit = [p for p in rows if p["cred"] >= thr]
+        out.append({
+            "key": f"t{thr}", "label": label, "threshold": thr,
+            "count": len(hit),
+            "cred": r(sum(p["cred"] for p in hit)),
+            "people": [{
+                "name": p["name"], "cred": r(p["cred"], 3),
+                "center": p["center"], "branch": p["branch"],
+                "manager": p["manager"],
+            } for p in hit[:limit]],
+            "truncated": max(0, len(hit) - limit),
+        })
+    return out
+
+
 def top_branches(per_date, dates, keep, hc_branch, top=15):
     """지사 단위 상위 목록 — 영업단·센터 화면."""
     last, prev = per_date[-1], (per_date[-2] if len(dates) > 1 else {})
@@ -214,20 +333,16 @@ def top_branches(per_date, dates, keep, hc_branch, top=15):
 # ===========================================================================
 def center_detail(snaps, dates, per_date, center, hc_branch, branch_meta):
     latest = snaps[-1]
+    award_defs = latest.get("awardDefs", [])
+    award_label = {a["key"]: a["label"] for a in award_defs}
     rows = [p for p in latest["people"] if p["center"] == center]
     last = {k: p for k, p in per_date[-1].items() if p["center"] == center}
     prev = {k: p for k, p in per_date[-2].items() if p["center"] == center} if len(dates) > 1 else {}
 
-    weeks = [{
-        "week": w + 1, "label": f"{w+1}주차",
-        "cred": r(sum(p["weeks"][w] for p in rows)),
-        "people": sum(1 for p in rows if p["weeks"][w] > 0),
-    } for w in range(5)]
-
     people = []
     for k, p in last.items():
         pv = prev.get(k)
-        items = sorted(({"label": AWARD_LABEL[ak], "money": a["money"]}
+        items = sorted(({"label": award_label.get(ak, ak), "money": a["money"]}
                         for ak, a in p["awards"].items() if a["money"] > 0),
                        key=lambda x: -x["money"])
         ser = []
@@ -247,7 +362,8 @@ def center_detail(snaps, dates, per_date, center, hc_branch, branch_meta):
         p["rank"] = i + 1
 
     awards = []
-    for key, label, *_ in schema.AWARDS:
+    for adef in award_defs:
+        key, label = adef["key"], adef["label"]
         paid = [p["awards"][key]["perf"] for p in latest["people"]
                 if key in p["awards"] and p["awards"][key]["money"] > 0]
         th = min(paid) if paid else None
@@ -267,7 +383,8 @@ def center_detail(snaps, dates, per_date, center, hc_branch, branch_meta):
                                  "manager": p["manager"], "perf": a["perf"], "gap": r(gap, 3)})
             near.sort(key=lambda x: x["gap"])
         awards.append({
-            "key": key, "label": label, "eligible": len(elig), "achieved": len(done),
+            "key": key, "label": label, "window": adef.get("window"),
+            "eligible": len(elig), "achieved": len(done),
             "rate": r(len(done) / len(elig) * 100, 1), "threshold": th, "near": near[:20],
         })
     awards.sort(key=lambda a: (-a["achieved"], -len(a["near"])))
@@ -284,7 +401,7 @@ def center_detail(snaps, dates, per_date, center, hc_branch, branch_meta):
         "activeRate": r(v["active"] / v["roster"] * 100, 1) if v["roster"] else 0,
     } for k, v in mgr.items()), key=lambda x: -x["cred"])
 
-    return weeks, people, awards, managers
+    return people, awards, managers
 
 
 # ===========================================================================
@@ -354,6 +471,10 @@ def build(src: Path, out: Path):
     (out / "dept").mkdir(parents=True, exist_ok=True)
     (out / "center").mkdir(parents=True, exist_ok=True)
 
+    windows = week_windows(latest, dates[-1][:7])
+    if not windows:
+        print("  ! 주차 구간을 헤더에서 못 읽었습니다 — 주차 분석 생략")
+
     # ---------------------------------------------------------------- 팀 ---
     t_daily = daily_rows(per_date, dates, ALL)
     depts = rollup(per_date, dates, ALL,
@@ -365,6 +486,7 @@ def build(src: Path, out: Path):
     depts.sort(key=lambda x: -x["cred"])
 
     ag_rows, ag_n, ag_conc = agency_rollup(per_date, dates, ALL)
+    t_weeks = week_rows(latest, ALL, windows, dates[-1])
     team_tgt = sum(tgt_dept.values()) if len(tgt_dept) == len(dept_of) else None
 
     team_payload = {
@@ -374,6 +496,8 @@ def build(src: Path, out: Path):
         "compare": d_meta, "agencies": ag_rows, "agencyCount": ag_n,
         "agencyConcentration": ag_conc,
         "partialTargets": {"have": len(tgt_dept), "total": len(dept_of)},
+        "weeks": t_weeks, "weekPace": week_pace(t_weeks),
+        "tiers": tier_cohorts(latest, ALL),
     }
     (out / "team.json").write_text(json.dumps(team_payload, ensure_ascii=False), encoding="utf-8")
 
@@ -389,6 +513,7 @@ def build(src: Path, out: Path):
         centers.sort(key=lambda x: -x["cred"])
         a_rows, a_n, a_conc = agency_rollup(per_date, dates, keep, top=12)
         b_rows, b_n = top_branches(per_date, dates, keep, hc_branch, top=15)
+        d_weeks = week_rows(latest, keep, windows, dates[-1])
         (out / "dept" / f"{dc}.json").write_text(json.dumps({
             "level": "dept", "key": dc, "name": dname, "asOf": dates[-1], "dates": dates,
             "parent": {"name": team, "href": "/"},
@@ -397,6 +522,8 @@ def build(src: Path, out: Path):
             "children": centers, "childLabel": "센터", "compare": c_meta,
             "agencies": a_rows, "agencyCount": a_n, "agencyConcentration": a_conc,
             "branches": b_rows, "branchCount": b_n,
+            "weeks": d_weeks, "weekPace": week_pace(d_weeks),
+            "tiers": tier_cohorts(latest, keep),
             "siblings": [{"key": u["key"], "name": u["name"], "href": u["href"]} for u in depts],
         }, ensure_ascii=False), encoding="utf-8")
 
@@ -411,8 +538,9 @@ def build(src: Path, out: Path):
             u["agency"] = bm.get("agency")
             u["worldTour"] = bm.get("worldTour", [])
         branches.sort(key=lambda x: -x["cred"])
-        weeks, people, awards, managers = center_detail(
+        people, awards, managers = center_detail(
             snaps, dates, per_date, cname, hc_branch, branch_meta)
+        c_weeks = week_rows(latest, keep, windows, dates[-1])
         sib = [{"key": c, "name": n, "href": f"/center/{c}"}
                for c, (n, d, _h) in center_of.items() if d == dc]
         (out / "center" / f"{cc}.json").write_text(json.dumps({
@@ -423,7 +551,9 @@ def build(src: Path, out: Path):
             "target": tgt_center.get(cc), "headcount": hc_center.get(cc, 0),
             "daily": daily_rows(per_date, dates, keep),
             "children": branches, "childLabel": "지사", "compare": b_meta,
-            "weeks": weeks, "people": people, "awards": awards, "managers": managers,
+            "weeks": c_weeks, "weekPace": week_pace(c_weeks),
+            "tiers": tier_cohorts(latest, keep),
+            "people": people, "awards": awards, "managers": managers,
             "siblings": sorted(sib, key=lambda x: x["name"]),
         }, ensure_ascii=False), encoding="utf-8")
 

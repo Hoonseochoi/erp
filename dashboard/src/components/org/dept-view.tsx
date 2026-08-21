@@ -10,6 +10,7 @@ import { OrgNav } from "./org-nav";
 import { OrgHeader } from "./org-header";
 import { Trend } from "./trend";
 import { Deviation, diagnoseAll } from "./deviation";
+import { WeekPacePanel } from "./week-pace";
 import { ChildrenPanel } from "./children-table";
 import { AgencyPanel } from "./agency-table";
 import { TabsShell } from "./tabs-shell";
@@ -34,8 +35,13 @@ export function DeptView({ data, index }: { data: DeptData; index: IndexData }) 
           { id: "trend", label: "추이", node: <Trend data={data} /> },
           {
             id: "diag", label: "궤도 진단",
-            node: <Deviation units={units} compare={data.compare}
-              label="센터" asOf={data.asOf} />,
+            node: (
+              <div className="space-y-8">
+                <WeekPacePanel weeks={data.weeks} pace={data.weekPace} />
+                <Deviation units={units} compare={data.compare}
+                  label="센터" asOf={data.asOf} />
+              </div>
+            ),
           },
           {
             id: "center", label: "센터",

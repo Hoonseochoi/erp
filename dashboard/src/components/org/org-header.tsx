@@ -11,7 +11,9 @@ import { latestDelta, pace } from "@/lib/analytics";
 import { m, md, mdw, n, pct, won, wonSigned } from "@/lib/format";
 import type { OrgBase } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { HelpTip } from "./help-tip";
 import { MetricDetail, type MetricKey } from "./metric-detail";
+import { TierCards } from "./tier-cards";
 
 /** 층에 상관없이 같은 KPI 묶음. 목표가 없으면 달성률 자리를 인당생산성이 대신한다. */
 export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string }) {
@@ -79,6 +81,8 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
           onClick={hasChildren ? () => setMetric("active") : undefined} />
       </div>
 
+      <TierCards data={data} />
+
       {hasChildren && (
         <MetricDetail metric={metric} open={metric !== null}
           onOpenChange={(v) => !v && setMetric(null)} data={data} />
@@ -95,13 +99,27 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
               <Bar label="영업일 진척"
                 right={`${p.elapsedBiz} / ${p.totalBiz}일 · ${pct(p.progressPct)}`}
                 value={p.progressPct} color="var(--viz-axis)" />
-              <p className="text-xs text-muted-foreground">
-                두 막대를 겹쳐 읽는다. 위가 길면 계획보다 앞선 것. 현재{" "}
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                계획 대비{" "}
                 <span className="tnum font-medium" style={{
                   color: p.gapPp! >= 0 ? "var(--status-good)" : "var(--status-warning)",
                 }}>
                   {p.gapPp! >= 0 ? "+" : ""}{p.gapPp!.toFixed(1)}%p
                 </span>
+                <HelpTip title="목표 페이스" width="w-72">
+                  <p>
+                    막대 두 개를 겹쳐 읽는다. <b>위(달성률)가 아래(영업일 진척)보다
+                    길면 계획보다 앞선 것</b>이다.
+                  </p>
+                  <p>
+                    달성률만 보면 월초엔 무조건 낮게 나와서 판단이 안 된다.
+                    시간이 얼마나 지났는지와 나란히 놔야 의미가 생긴다.
+                  </p>
+                  <p>
+                    <b>필요 일평균</b>은 남은 목표를 남은 영업일로 나눈 값이다.
+                    지금 일평균보다 크면 속도를 올려야 한다는 뜻.
+                  </p>
+                </HelpTip>
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">

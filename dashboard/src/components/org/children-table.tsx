@@ -14,6 +14,7 @@ import {
   Legend, MultiLineChart, RankBarChart, Sparkline, type SimpleDatum,
 } from "@/components/charts/chart-kit";
 import { LEVEL_COLOR } from "@/lib/analytics";
+import { HelpTip } from "./help-tip";
 import { m, man, md, n, pct } from "@/lib/format";
 import type { Compare } from "@/lib/types";
 import { ClickableRow } from "./clickable-row";
@@ -73,10 +74,19 @@ export function ChildrenPanel({
           <CardHeader className="gap-2">
             <div>
               <CardTitle>{label} 랭킹</CardTitle>
-              <CardDescription>
-                {hasTarget
-                  ? "목표가 조직마다 다르므로 기본 정렬은 달성률이다. 총액 랭킹은 규모 순일 뿐이다."
-                  : "목표가 없는 조직이 섞여 있어 인당생산성이 규모 보정 잣대다."}
+              <CardDescription className="flex items-center gap-1.5">
+                기본 정렬 {hasTarget ? "달성률" : "인당생산성"}
+                <HelpTip title="왜 총액순이 기본이 아닌가" width="w-72">
+                  <p>
+                    조직마다 목표와 재적이 달라서 <b>총액 랭킹은 사실상 규모 순위</b>다.
+                    큰 조직이 언제나 위에 온다.
+                  </p>
+                  <p>
+                    {hasTarget
+                      ? "목표가 모두 등록돼 있어 달성률로 줄 세운다."
+                      : "목표가 없는 조직이 섞여 있어 재적 1인당 실적(인당생산성)으로 대신 줄 세운다."}
+                  </p>
+                </HelpTip>
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -115,9 +125,13 @@ export function ChildrenPanel({
       <Card>
         <CardHeader>
           <CardTitle>{label} 상세</CardTitle>
-          <CardDescription>
-            금액 단위 만원. 인당 = 실적 ÷ 재적. 속도 = 최근 3일 ÷ 이전 3일.
-            {showLinks && " 행을 누르면 해당 조직으로 들어간다."}
+          <CardDescription className="flex items-center gap-1.5">
+            금액 만원{showLinks && " · 행을 누르면 해당 조직으로 이동"}
+            <HelpTip title="표 읽는 법" width="w-72">
+              <p><b>인당</b> = 실적 ÷ 재적. 조직 크기를 보정한 값.</p>
+              <p><b>속도</b> = 최근 3일 ÷ 이전 3일. 1보다 작으면 느려지는 중.</p>
+              <p>이름 앞 점은 궤도 진단 등급(정상·주의·이탈)이다.</p>
+            </HelpTip>
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 pb-2">

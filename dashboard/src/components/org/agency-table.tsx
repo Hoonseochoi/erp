@@ -8,6 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Legend, RankBarChart, type SimpleDatum } from "@/components/charts/chart-kit";
+import { HelpTip } from "./help-tip";
 import { m, man, n, pct } from "@/lib/format";
 import type { AgencyRow, Concentration } from "@/lib/types";
 
@@ -56,9 +57,18 @@ export function AgencyPanel({
         <Card>
           <CardHeader>
             <CardTitle>집중도</CardTitle>
-            <CardDescription>
-              소수 법인에 얼마나 기대고 있나. 상위 편중이 크면 그 법인이 흔들릴 때
-              조직 전체가 흔들린다.
+            <CardDescription className="flex items-center gap-1.5">
+              소수 법인 의존도
+              <HelpTip title="집중도 읽는 법" width="w-72">
+                <p>
+                  상위 몇 개 법인이 실적의 몇 %를 차지하는지 본다.
+                  <b> 편중이 크면 그 법인이 흔들릴 때 조직 전체가 흔들린다.</b>
+                </p>
+                <p>
+                  <b>HHI</b>는 점유율 제곱합이다. 1,500 미만이면 분산,
+                  2,500 이상이면 특정 법인 의존이 크다는 뜻.
+                </p>
+              </HelpTip>
             </CardDescription>
           </CardHeader>
           <CardContent>

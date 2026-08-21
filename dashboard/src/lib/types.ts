@@ -115,6 +115,9 @@ export type OrgBase = {
   children: Unit[];
   childLabel: string;
   compare: Compare;
+  weeks: WeekRow[];
+  weekPace: WeekPace;
+  tiers: Tier[];
 };
 
 export type TeamData = OrgBase & {
@@ -137,7 +140,62 @@ export type DeptData = OrgBase & {
   siblings: Link[];
 };
 
-export type WeekRow = { week: number; label: string; cred: number; people: number };
+export type WeekRow = {
+  week: number;
+  label: string;
+  /** 천원 */
+  cred: number;
+  people: number;
+  /** 원본 시상 헤더에서 읽은 주차 구간 */
+  from: string | null;
+  to: string | null;
+  /** 그 주차에서 지금까지 지난 영업일 / 전체 영업일 */
+  bizDays: number | null;
+  totalBizDays: number | null;
+  state: "done" | "running" | "upcoming" | "none";
+};
+
+export type WeekPace = {
+  done: { week: number; cred: number; bizDays: number; perDay: number }[];
+  /** 완료 주차들의 영업일당 실적 평균 */
+  baselinePerDay: number;
+  prevPerDay: number;
+  current: {
+    week: number;
+    cred: number;
+    bizDays: number;
+    totalBizDays: number | null;
+    perDay: number;
+    /** 기준선 × 경과 영업일 */
+    expectedNow: number;
+    expectedFull: number | null;
+    /** 지금 속도가 유지될 때의 주차 마감 예상 */
+    projected: number | null;
+    /** 실제 ÷ 기대. 1 미만이면 뒤처진 것 */
+    paceRatio: number | null;
+  } | null;
+} | null;
+
+export type TierPerson = {
+  name: string;
+  cred: number;
+  center: string;
+  branch: string;
+  manager: string | null;
+};
+
+/** 실적 구간 코호트 (10만 가동 / 20만 가동) */
+export type Tier = {
+  key: string;
+  label: string;
+  /** 천원 기준 문턱 */
+  threshold: number;
+  count: number;
+  cred: number;
+  people: TierPerson[];
+  /** 목록에서 잘린 인원 수 */
+  truncated: number;
+};
 export type AwardItem = { label: string; money: number };
 export type PersonRow = {
   code: number | null;
@@ -159,6 +217,8 @@ export type AwardNear = {
 export type AwardRow = {
   key: string; label: string; eligible: number; achieved: number;
   rate: number; threshold: number | null; near: AwardNear[];
+  /** 원본 헤더의 적용 기간 표기 (예: 8.18~23일) */
+  window?: string | null;
 };
 export type ManagerRow = {
   manager: string; cred: number; dCred: number; roster: number;
@@ -171,7 +231,6 @@ export type CenterData = OrgBase & {
   head: string;
   parent: Link;
   grandparent: Link;
-  weeks: WeekRow[];
   people: PersonRow[];
   awards: AwardRow[];
   managers: ManagerRow[];
