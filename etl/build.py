@@ -90,17 +90,26 @@ def my_rank(units, key, field):
     me = next((u for u in units if u["key"] == key), None)
     if not me or me.get(f"{field}Rank") is None:
         return None
-    total = len({u[field] for u in units if u.get(field) is not None})
+    total = sum(1 for u in units if u.get(field) is not None)
     return {"rank": me[f"{field}Rank"], "of": total, "value": me[field]}
 
 
 def rank_by(units, field, reverse=True):
-    """공동 순위를 인정하는 순위 매김. 값이 없으면 순위도 없다."""
-    vals = sorted({u[field] for u in units if u.get(field) is not None}, reverse=reverse)
-    pos = {v: i + 1 for i, v in enumerate(vals)}
+    """공동 순위를 인정하는 순위 매김. 값이 없으면 순위도 없다.
+
+    동점은 같은 순위를 받고 그만큼 다음 순위를 건너뛴다(1·2·2·4).
+    분모는 값이 있는 **조직 수**다. 서로 다른 값의 가짓수를 세면
+    동점이 하나만 생겨도 '5/6위' 처럼 분모가 줄어 실제보다 작아 보인다.
+    """
+    scored = [u for u in units if u.get(field) is not None]
+    order = sorted({u[field] for u in scored}, reverse=reverse)
+    seen, pos = 0, {}
+    for v in order:
+        pos[v] = seen + 1
+        seen += sum(1 for u in scored if u[field] == v)
     for u in units:
         u[f"{field}Rank"] = pos.get(u.get(field))
-    return len(vals)
+    return len(scored)
 
 
 # ===========================================================================
