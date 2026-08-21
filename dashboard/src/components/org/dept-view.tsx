@@ -28,8 +28,8 @@ export function DeptView({ data, index }: { data: DeptData; index: IndexData }) 
       ]} />
 
       <div className="pt-7">
-        <OrgHeader data={data}
-          subtitle={`${data.parent.name} · 센터 ${data.children.length}개 · 지사 ${n(data.branchCount)}개`} />
+        <OrgHeader data={data} ranks={data.ranks}
+          subtitle={`${data.parent.name}${data.head ? ` · 단장 ${data.head}` : ""} · 센터 ${data.children.length}개 · 지사 ${n(data.branchCount)}개`} />
 
         <TabsShell panes={[
           { id: "trend", label: "추이", node: <Trend data={data} /> },

@@ -38,7 +38,7 @@ export function CenterView({ data, index }: { data: CenterData; index: IndexData
       ]} />
 
       <div className="pt-7">
-        <OrgHeader data={data}
+        <OrgHeader data={data} ranks={data.ranks}
           subtitle={`${data.parent.name} · 센터장 ${data.head} · 지사 ${data.children.length}개 · 실적 설계사 ${data.people.length}명`} />
 
         <TabsShell panes={[

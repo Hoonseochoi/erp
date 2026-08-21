@@ -59,6 +59,12 @@ export function ChildrenPanel({
     return row;
   });
 
+  /** 지금 줄 세운 잣대와 짝이 되는 다른 잣대. 규모와 달성도가 어긋나는 조직을 드러낸다. */
+  const alt: { key: SortKey; label: string } | null =
+    sort === "cred"
+      ? (hasTarget ? { key: "achievedPct", label: "달성률" } : { key: "perCapita", label: "인당" })
+      : { key: "cred", label: "실적" };
+
   const SORTS: [SortKey, string][] = [
     ["cred", "실적"],
     ...(hasTarget ? ([["achievedPct", "달성률"]] as [SortKey, string][]) : []),
@@ -131,6 +137,11 @@ export function ChildrenPanel({
               <p><b>인당</b> = 실적 ÷ 재적. 조직 크기를 보정한 값.</p>
               <p><b>속도</b> = 최근 3일 ÷ 이전 3일. 1보다 작으면 느려지는 중.</p>
               <p>이름 앞 점은 궤도 진단 등급(정상·주의·이탈)이다.</p>
+              <p>
+                <b>#</b> 는 지금 누른 잣대의 순위, 이름 아래 회색 숫자는
+                <b> 짝이 되는 다른 잣대의 순위</b>다. 두 숫자가 크게 벌어지면
+                규모와 달성도가 어긋난 조직이다.
+              </p>
             </HelpTip>
           </CardDescription>
         </CardHeader>
@@ -155,16 +166,23 @@ export function ChildrenPanel({
               {rows.map((u, i) => {
                 const cells = (
                   <>
-                    <TableCell className="tnum pl-5 text-muted-foreground">{i + 1}</TableCell>
+                    <TableCell className="tnum pl-5 text-muted-foreground">
+                      {u[`${sort}Rank`] ?? i + 1}
+                    </TableCell>
                     <TableCell className="max-w-[220px]">
                       <div className="flex items-center gap-1.5">
                         <span className="h-1.5 w-1.5 shrink-0 rounded-full"
                           style={{ background: LEVEL_COLOR[u.level] }} />
                         <span className="truncate font-medium">{u.name}</span>
                       </div>
-                      {u.agency && (
-                        <div className="truncate pl-3 text-xs text-muted-foreground">{u.agency}</div>
-                      )}
+                      <div className="flex flex-wrap items-center gap-x-2 pl-3 text-xs text-muted-foreground">
+                        {u.agency && <span className="truncate">{u.agency}</span>}
+                        {alt && u[`${alt.key}Rank`] && (
+                          <span className="tnum shrink-0">
+                            {alt.label} {u[`${alt.key}Rank`]}위
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     {hasTarget && (
                       <TableCell className="tnum text-right font-semibold">

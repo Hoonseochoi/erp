@@ -62,10 +62,45 @@ def r(x, n=1):
 
 
 def load_targets(month: str):
+    """센터별 목표 묶음 + 영업단장 이름.
+
+    값이 숫자면 매출목표만 있던 옛 포맷이므로 그대로 감싸서 받는다.
+    """
     if not TARGETS_FILE.exists():
-        return {}
+        return {}, {}
     raw = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))
-    return raw.get("months", {}).get(month, {}).get("centers", {})
+    mon = raw.get("months", {}).get(month, {})
+    out = {}
+    for name, v in mon.get("centers", {}).items():
+        out[name] = {"revenue": v, "prev10man": 0, "target20man": 0, "head": None} \
+            if isinstance(v, (int, float)) else v
+    return out, mon.get("deptHeads", {})
+
+
+def attach_ranks(units):
+    """자식 목록에 지표별 순위를 매긴다. 표·배지 어디서든 바로 쓴다."""
+    n = {}
+    for f in ("cred", "achievedPct", "perCapita", "activeRate", "momentum"):
+        n[f] = rank_by(units, f)
+    return n
+
+
+def my_rank(units, key, field):
+    """이 조직이 형제들 사이에서 몇 위인지."""
+    me = next((u for u in units if u["key"] == key), None)
+    if not me or me.get(f"{field}Rank") is None:
+        return None
+    total = len({u[field] for u in units if u.get(field) is not None})
+    return {"rank": me[f"{field}Rank"], "of": total, "value": me[field]}
+
+
+def rank_by(units, field, reverse=True):
+    """공동 순위를 인정하는 순위 매김. 값이 없으면 순위도 없다."""
+    vals = sorted({u[field] for u in units if u.get(field) is not None}, reverse=reverse)
+    pos = {v: i + 1 for i, v in enumerate(vals)}
+    for u in units:
+        u[f"{field}Rank"] = pos.get(u.get(field))
+    return len(vals)
 
 
 # ===========================================================================
@@ -280,15 +315,27 @@ def week_pace(weeks):
     return out
 
 
-def tier_cohorts(latest, keep, limit=1000):
-    """실적 구간별 대상자. 10만/20만 가동은 현장에서 바로 쓰는 관리 단위다."""
+def tier_cohorts(latest, keep, goal=None, limit=1000):
+    """실적 구간별 대상자. 10만/20만 가동은 현장에서 바로 쓰는 관리 단위다.
+
+    goal 이 있으면 10만은 **전월 실적** 대비, 20만은 **이번 달 목표** 대비로 보여준다.
+    (원본이 10만은 전월 실적만, 20만은 목표만 주기 때문에 비교 대상이 다르다.)
+    """
     rows = sorted((p for p in latest["people"] if keep(p)), key=lambda p: -p["cred"])
     out = []
     for thr, label in TIERS:
         hit = [p for p in rows if p["cred"] >= thr]
+        ref = None
+        if goal:
+            if thr == 100 and goal.get("prev10man"):
+                ref = {"kind": "prev", "label": "전월", "value": goal["prev10man"]}
+            elif thr == 200 and goal.get("target20man"):
+                ref = {"kind": "target", "label": "목표", "value": goal["target20man"]}
         out.append({
             "key": f"t{thr}", "label": label, "threshold": thr,
             "count": len(hit),
+            "ref": ref,
+            "refPct": r(len(hit) / ref["value"] * 100, 1) if ref and ref["value"] else None,
             "cred": r(sum(p["cred"] for p in hit)),
             "people": [{
                 "name": p["name"], "cred": r(p["cred"], 3),
@@ -425,7 +472,7 @@ def build(src: Path, out: Path):
     dates = [s["asOf"] for s in snaps]
     latest = snaps[-1]
 
-    targets = load_targets(dates[-1][:7])
+    targets, dept_heads = load_targets(dates[-1][:7])
     print(f"  · 목표 {len(targets)}개 지점 로드 ({dates[-1][:7]})" if targets
           else f"  ! {dates[-1][:7]} 목표 없음 — 인당생산성으로 비교")
 
@@ -454,16 +501,23 @@ def build(src: Path, out: Path):
         dept_of[str(p["deptCode"])] = p["dept"]
         center_of[str(p["centerCode"])] = (p["center"], str(p["deptCode"]), p["centerHead"])
 
-    tgt_center = {}
-    for code, (nm, _dc, _h) in center_of.items():
-        if nm in targets:
-            tgt_center[code] = targets[nm]
-    # 영업단 목표 = 소속 센터 목표 합 (전부 있을 때만)
-    tgt_dept = {}
+    # 센터 코드 → 목표 묶음. 상위 조직은 소속 센터를 전부 갖췄을 때만 합산한다.
+    goal_center = {code: targets[nm] for code, (nm, _dc, _h) in center_of.items()
+                   if nm in targets}
+    tgt_center = {c: g["revenue"] for c, g in goal_center.items()}
+
+    goal_dept, tgt_dept = {}, {}
     for dc in dept_of:
         cs = [c for c, (_n, d, _h) in center_of.items() if d == dc]
-        if cs and all(c in tgt_center for c in cs):
-            tgt_dept[dc] = sum(tgt_center[c] for c in cs)
+        if not cs or not all(c in goal_center for c in cs):
+            continue
+        goal_dept[dc] = {k: sum(goal_center[c][k] for c in cs)
+                         for k in ("revenue", "prev10man", "target20man")}
+        tgt_dept[dc] = goal_dept[dc]["revenue"]
+
+    goal_team = ({k: sum(g[k] for g in goal_dept.values())
+                  for k in ("revenue", "prev10man", "target20man")}
+                 if len(goal_dept) == len(dept_of) else None)
 
     out.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(out / "dept", ignore_errors=True)
@@ -483,7 +537,14 @@ def build(src: Path, out: Path):
     for u in depts:
         u["href"] = f"/dept/{u['key']}"
         u["centers"] = sum(1 for c, (_n, dc, _h) in center_of.items() if dc == u["key"])
+        u["head"] = dept_heads.get(u["name"])
+    attach_ranks(depts)
     depts.sort(key=lambda x: -x["cred"])
+
+    all_centers = rollup(per_date, dates, ALL,
+                         lambda p: (str(p["centerCode"]), p["center"]), hc_center, tgt_center)
+    add_stats(all_centers, dates)
+    attach_ranks(all_centers)
 
     ag_rows, ag_n, ag_conc = agency_rollup(per_date, dates, ALL)
     t_weeks = week_rows(latest, ALL, windows, dates[-1])
@@ -497,7 +558,7 @@ def build(src: Path, out: Path):
         "agencyConcentration": ag_conc,
         "partialTargets": {"have": len(tgt_dept), "total": len(dept_of)},
         "weeks": t_weeks, "weekPace": week_pace(t_weeks),
-        "tiers": tier_cohorts(latest, ALL),
+        "tiers": tier_cohorts(latest, ALL, goal_team),
     }
     (out / "team.json").write_text(json.dumps(team_payload, ensure_ascii=False), encoding="utf-8")
 
@@ -510,6 +571,7 @@ def build(src: Path, out: Path):
         for u in centers:
             u["href"] = f"/center/{u['key']}"
             u["head"] = center_of.get(u["key"], ("", "", ""))[2]
+        attach_ranks(centers)
         centers.sort(key=lambda x: -x["cred"])
         a_rows, a_n, a_conc = agency_rollup(per_date, dates, keep, top=12)
         b_rows, b_n = top_branches(per_date, dates, keep, hc_branch, top=15)
@@ -523,7 +585,15 @@ def build(src: Path, out: Path):
             "agencies": a_rows, "agencyCount": a_n, "agencyConcentration": a_conc,
             "branches": b_rows, "branchCount": b_n,
             "weeks": d_weeks, "weekPace": week_pace(d_weeks),
-            "tiers": tier_cohorts(latest, keep),
+            "tiers": tier_cohorts(latest, keep, goal_dept.get(dc)),
+            "head": dept_heads.get(dname),
+            "ranks": {
+                "scope": "팀 내 영업단",
+                "cred": my_rank(depts, dc, "cred"),
+                "achievedPct": my_rank(depts, dc, "achievedPct"),
+                "perCapita": my_rank(depts, dc, "perCapita"),
+                "activeRate": my_rank(depts, dc, "activeRate"),
+            },
             "siblings": [{"key": u["key"], "name": u["name"], "href": u["href"]} for u in depts],
         }, ensure_ascii=False), encoding="utf-8")
 
@@ -537,6 +607,7 @@ def build(src: Path, out: Path):
             bm = branch_meta.get(int(u["key"]) if u["key"].isdigit() else u["key"], {})
             u["agency"] = bm.get("agency")
             u["worldTour"] = bm.get("worldTour", [])
+        attach_ranks(branches)
         branches.sort(key=lambda x: -x["cred"])
         people, awards, managers = center_detail(
             snaps, dates, per_date, cname, hc_branch, branch_meta)
@@ -552,7 +623,14 @@ def build(src: Path, out: Path):
             "daily": daily_rows(per_date, dates, keep),
             "children": branches, "childLabel": "지사", "compare": b_meta,
             "weeks": c_weeks, "weekPace": week_pace(c_weeks),
-            "tiers": tier_cohorts(latest, keep),
+            "tiers": tier_cohorts(latest, keep, goal_center.get(cc)),
+            "ranks": {
+                "scope": "전체 센터",
+                "cred": my_rank(all_centers, cc, "cred"),
+                "achievedPct": my_rank(all_centers, cc, "achievedPct"),
+                "perCapita": my_rank(all_centers, cc, "perCapita"),
+                "activeRate": my_rank(all_centers, cc, "activeRate"),
+            },
             "people": people, "awards": awards, "managers": managers,
             "siblings": sorted(sib, key=lambda x: x["name"]),
         }, ensure_ascii=False), encoding="utf-8")

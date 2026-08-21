@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -15,6 +16,18 @@ import {
 import { HelpTip } from "./help-tip";
 import { m, n, pct, won } from "@/lib/format";
 import type { OrgBase, Tier } from "@/lib/types";
+
+/**
+ * 목표(20만)나 전월(10만) 대비 색.
+ * 전월 대비는 100%만 넘겨도 성장이니 기준을 낮게, 목표 대비는 100%가 기준선이다.
+ */
+function refTone(t: Tier) {
+  const p = t.refPct ?? 0;
+  if (t.ref?.kind === "prev") {
+    return p >= 100 ? "var(--status-good)" : p >= 90 ? "var(--status-warning)" : "var(--status-critical)";
+  }
+  return p >= 100 ? "var(--status-good)" : p >= 80 ? "var(--status-warning)" : "var(--status-critical)";
+}
 
 /** 10만 가동 / 20만 가동 카드. 누르면 대상자 명단이 열린다. */
 export function TierCards({ data }: { data: OrgBase }) {
@@ -47,6 +60,10 @@ export function TierCards({ data }: { data: OrgBase }) {
                     움직인 인원</b>만 센다. 가동률은 높은데 이 숫자가 낮으면
                     &ldquo;찍기만 하고 크게 못 판다&rdquo;는 신호다.
                   </p>
+                  <p>
+                    <b>10만은 전월 실적과, 20만은 이번 달 목표와</b> 견준다.
+                    원본이 10만은 전월 인원만, 20만은 목표 인원만 주기 때문이다.
+                  </p>
                   <p>카드를 누르면 대상자 명단이 열린다.</p>
                 </HelpTip>
               )}
@@ -55,9 +72,25 @@ export function TierCards({ data }: { data: OrgBase }) {
               <span className="text-2xl font-semibold tracking-tight">{n(t.count)}</span>
               <span className="text-xs text-muted-foreground">명</span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-              <span>실적 {won(t.cred)}원</span>
-              {active > 0 && <span>가동 중 {pct((t.count / active) * 100, 0)}</span>}
+            {t.ref && t.refPct !== null ? (
+              <>
+                <div className="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {t.ref.label} {n(t.ref.value)}명
+                  </span>
+                  <span className="tnum font-medium" style={{ color: refTone(t) }}>
+                    {t.refPct.toFixed(0)}%
+                  </span>
+                </div>
+                <Progress className="mt-1 h-1.5" value={Math.min(100, t.refPct)}
+                  indicatorColor={refTone(t)} />
+              </>
+            ) : (
+              <div className="mt-1 text-xs text-muted-foreground">실적 {won(t.cred)}원</div>
+            )}
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              실적 {won(t.cred)}원
+              {active > 0 && ` · 가동 중 ${pct((t.count / active) * 100, 0)}`}
             </div>
           </Card>
         ))}

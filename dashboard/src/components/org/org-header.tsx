@@ -9,14 +9,17 @@ import { Progress } from "@/components/ui/progress";
 import { Sparkline } from "@/components/charts/chart-kit";
 import { latestDelta, pace } from "@/lib/analytics";
 import { m, md, mdw, n, pct, won, wonSigned } from "@/lib/format";
-import type { OrgBase } from "@/lib/types";
+import type { OrgBase, Ranks } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { HelpTip } from "./help-tip";
 import { MetricDetail, type MetricKey } from "./metric-detail";
+import { RankBadges } from "./rank-badges";
 import { TierCards } from "./tier-cards";
 
 /** 층에 상관없이 같은 KPI 묶음. 목표가 없으면 달성률 자리를 인당생산성이 대신한다. */
-export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string }) {
+export function OrgHeader({ data, subtitle, ranks }: {
+  data: OrgBase; subtitle?: string; ranks?: Ranks;
+}) {
   const last = data.daily.at(-1)!;
   const { last: dl, avgPerDay } = latestDelta(data.daily);
   const p = pace(data.asOf, last.cred, data.target);
@@ -31,6 +34,7 @@ export function OrgHeader({ data, subtitle }: { data: OrgBase; subtitle?: string
         <div>
           <h1 className="text-2xl font-bold tracking-tighter sm:text-3xl">{data.name}</h1>
           {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+          {ranks && <div className="mt-2"><RankBadges ranks={ranks} /></div>}
         </div>
         <div className="flex flex-wrap gap-1.5">
           {data.target ? (

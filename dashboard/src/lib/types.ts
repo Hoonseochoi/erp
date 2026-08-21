@@ -43,6 +43,12 @@ export type Unit = {
   momentum: number | null;
   /** 동료 집단 안에서의 로버스트 편차 */
   z: number | null;
+  /** 형제 조직 사이 순위 (attach_ranks) */
+  credRank?: number | null;
+  achievedPctRank?: number | null;
+  perCapitaRank?: number | null;
+  activeRateRank?: number | null;
+  momentumRank?: number | null;
   series: Point[];
   /** 영업단에만 */
   centers?: number;
@@ -131,6 +137,9 @@ export type TeamData = OrgBase & {
 export type DeptData = OrgBase & {
   level: "dept";
   key: string;
+  /** 영업단장 */
+  head: string | null;
+  ranks: Ranks;
   parent: Link;
   agencies: AgencyRow[];
   agencyCount: number;
@@ -184,6 +193,13 @@ export type TierPerson = {
   manager: string | null;
 };
 
+/** 코호트 비교 기준. 10만은 전월 실적, 20만은 이번 달 목표와 견준다. */
+export type TierRef = {
+  kind: "prev" | "target";
+  label: string;
+  value: number;
+};
+
 /** 실적 구간 코호트 (10만 가동 / 20만 가동) */
 export type Tier = {
   key: string;
@@ -192,9 +208,23 @@ export type Tier = {
   threshold: number;
   count: number;
   cred: number;
+  ref: TierRef | null;
+  /** count ÷ ref.value */
+  refPct: number | null;
   people: TierPerson[];
   /** 목록에서 잘린 인원 수 */
   truncated: number;
+};
+
+/** 형제 조직 사이에서의 순위 */
+export type Rank = { rank: number; of: number; value: number } | null;
+
+export type Ranks = {
+  scope: string;
+  cred: Rank;
+  achievedPct: Rank;
+  perCapita: Rank;
+  activeRate: Rank;
 };
 export type AwardItem = { label: string; money: number };
 export type PersonRow = {
@@ -228,7 +258,9 @@ export type ManagerRow = {
 export type CenterData = OrgBase & {
   level: "center";
   key: string;
+  /** 센터장 */
   head: string;
+  ranks: Ranks;
   parent: Link;
   grandparent: Link;
   people: PersonRow[];
