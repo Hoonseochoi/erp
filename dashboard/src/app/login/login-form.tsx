@@ -29,7 +29,7 @@ export function LoginForm({ next }: { next: string }) {
         </div>
         <h1 className="text-2xl font-bold tracking-tighter">매출 대시보드</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          경인.GA7센터 · 열람 권한이 있는 사람만 들어올 수 있습니다.
+          열람 권한이 있는 사람만 접속 가능합니다.
         </p>
       </div>
 
