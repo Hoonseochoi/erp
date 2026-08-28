@@ -11,6 +11,10 @@ dashboard/data/
 # 지점별 월 목표 (사내 대외비). 구조는 targets.example.json 참고.
 etl/targets.json
 
+# 오프라인 HTML 스냅샷 — 설계사 실명·실적이 그대로 박제된 파일이다.
+exports/
+artifacts/
+
 # 원본 실적 파일이 혹시 저장소 안으로 들어오는 사고 방지
 *.xlsb
 *.xlsx
