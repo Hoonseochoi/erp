@@ -247,7 +247,7 @@ def load_snapshot(path: Path, cache_dir: Path):
     return snap
 
 
-SNAPSHOT_PATTERNS = ("*설계사시상 진척현황*", "*설계사 인별실적시트*")
+SNAPSHOT_PATTERNS = ("*설계사시상 진척현황*", "*설계사 인별실적시트*", "*인별실적*")
 
 
 def discover(src_dir: Path):
