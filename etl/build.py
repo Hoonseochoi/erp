@@ -475,15 +475,31 @@ def build(src: Path, out: Path):
             print(f"  ! 기준일 없음, 건너뜀: {p.name}")
             continue
         snaps.append(s)
-        print(f"  · {s['asOf']}  {p.name}  ({len(s['people']):,}행)")
     dedup = {s["asOf"]: s for s in sorted(snaps, key=lambda x: x["asOf"])}
     snaps = [dedup[k] for k in sorted(dedup)]
+
+    # 실적은 매달 0 에서 다시 쌓인다. 월이 섞이면 누적 곡선이 월말에 절벽처럼
+    # 떨어져 버리므로 **가장 최근 실적월 하나만** 남긴다.
+    # 실적월은 asOf 가 아니라 실적 컬럼 헤더가 정한다(마감 최종본은 asOf 가
+    # 다음 달 1일인데 내용은 전월치다).
+    months = [s.get("perfMonth") or s["asOf"][:7] for s in snaps]
+    month = max(months)
+    dropped = [s for s, mo in zip(snaps, months) if mo != month]
+    snaps = [s for s, mo in zip(snaps, months) if mo == month]
+
+    for s in snaps:
+        print(f"  · {s['asOf']}  {s['source']}  ({len(s['people']):,}행)")
+    if dropped:
+        print(f"  · 이전 월 {len(dropped)}개 제외 "
+              f"({', '.join(sorted({(s.get('perfMonth') or s['asOf'][:7]) for s in dropped}))})"
+              f" — 대상 월 {month}")
+
     dates = [s["asOf"] for s in snaps]
     latest = snaps[-1]
 
-    targets, dept_heads = load_targets(dates[-1][:7])
-    print(f"  · 목표 {len(targets)}개 지점 로드 ({dates[-1][:7]})" if targets
-          else f"  ! {dates[-1][:7]} 목표 없음 — 인당생산성으로 비교")
+    targets, dept_heads = load_targets(month)
+    print(f"  · 목표 {len(targets)}개 지점 로드 ({month})" if targets
+          else f"  ! {month} 목표 없음 — 인당생산성으로 비교")
 
     # 재적 인원 (지사 시트) --------------------------------------------------
     hc_branch, hc_center, hc_dept, branch_meta = {}, defaultdict(int), defaultdict(int), {}
@@ -534,7 +550,7 @@ def build(src: Path, out: Path):
     (out / "dept").mkdir(parents=True, exist_ok=True)
     (out / "center").mkdir(parents=True, exist_ok=True)
 
-    windows = week_windows(latest, dates[-1][:7])
+    windows = week_windows(latest, month)
     if not windows:
         print("  ! 주차 구간을 헤더에서 못 읽었습니다 — 주차 분석 생략")
 
@@ -647,7 +663,7 @@ def build(src: Path, out: Path):
     # -------------------------------------------------------------- 색인 ---
     (out / "index.json").write_text(json.dumps({
         "generatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
-        "asOf": dates[-1], "month": dates[-1][:7], "team": team,
+        "asOf": dates[-1], "month": month, "team": team,
         "snapshots": [{"date": s["asOf"], "source": s["source"], "rows": len(s["people"])}
                       for s in snaps],
         "warnings": sorted({w for s in snaps for w in s["warnings"]}),

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import schema
 
+MANAGER_MAPPING_PATH = Path("/Users/hoons/Documents/prizedashboard/automation/manager_mapping.json")
+
 PASSWORDS = ["0000", ""]
 
 EPOCH = datetime.date(1899, 12, 30)
@@ -125,6 +127,50 @@ def num(v):
     return 0.0
 
 
+def load_manager_mapping(path: Path = MANAGER_MAPPING_PATH):
+    """Load the current canonical manager mapping used by PRIZE and GA reports."""
+    if not path.exists():
+        return {
+            "middle_financial_partners": {"agent_code_to_manager": {}},
+            "office_overrides": [],
+        }
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_manager(person: dict, mapping=None):
+    """Resolve per-agent first, then branch/office, then workbook manager."""
+    mapping = mapping or load_manager_mapping()
+    agent_code = str(person.get("code") or "").removesuffix(".0")
+    agent_map = mapping.get("middle_financial_partners", {}).get("agent_code_to_manager", {})
+    if agent_code in agent_map:
+        return agent_map[agent_code]
+    office_code = str(person.get("branchCode") or "").removesuffix(".0")
+    for rule in mapping.get("office_overrides", []):
+        if str(rule.get("office_code") or "") == office_code:
+            return rule.get("manager") or person.get("manager")
+    return person.get("manager")
+
+
+def apply_current_manager_mapping(snapshot: dict, mapping=None):
+    """Apply current mapping in memory, preserving the workbook value for audit."""
+    mapping = mapping or load_manager_mapping()
+    for person in snapshot.get("people", []):
+        original = person.get("managerSource", person.get("manager"))
+        person["manager"] = original
+        resolved = resolve_manager(person, mapping)
+        if resolved != original:
+            person["managerSource"] = original
+            person["manager"] = resolved
+            person["managerOverrideApplied"] = True
+        else:
+            person.pop("managerSource", None)
+            person["managerOverrideApplied"] = False
+        headquarters = mapping.get("middle_financial_partners", {}).get("agent_code_to_headquarters", {}).get(str(person.get("code") or "").removesuffix(".0"))
+        if headquarters:
+            person["headquarters"] = headquarters
+    return snapshot
+
+
 def parse_snapshot(path: Path):
     """한 파일 → {'as_of': 'YYYY-MM-DD', 'people': [...], 'branches': [...]}"""
     rows = raw_rows(path, "설계사")
@@ -217,8 +263,18 @@ def parse_snapshot(path: Path):
                 ],
             })
 
+    # 실적 컬럼(17) 헤더는 '8월'/'9월' 이다. asOf 로 월을 판단하면 안 된다 —
+    # 마감 최종본은 asOf 가 다음 달 1일인데 내용은 전월 실적이다.
+    perf_month = None
+    mo = re.match(r"(\d{1,2})월", str(header.get(schema.COL["cred_month"]) or ""))
+    if mo and as_of:
+        month = int(mo[1])
+        year = as_of.year - 1 if (as_of.month == 1 and month == 12) else as_of.year
+        perf_month = f"{year}-{month:02d}"
+
     return {
         "asOf": as_of.isoformat() if as_of else None,
+        "perfMonth": perf_month,
         "source": path.name,
         "warnings": warnings,
         "awardDefs": [{"key": a["key"], "label": a["label"], "window": a["window"]}
@@ -237,14 +293,17 @@ def load_snapshot(path: Path, cache_dir: Path):
     key = f"{path.stem}__{st.st_size}_{int(st.st_mtime)}.json"
     cached = cache_dir / key
     if cached.exists():
-        return json.loads(cached.read_text(encoding="utf-8"))
+        snapshot = json.loads(cached.read_text(encoding="utf-8"))
+        return apply_current_manager_mapping(snapshot)
     snap = parse_snapshot(path)
+    # Cache the raw workbook interpretation. Current manager mapping is applied
+    # only in memory so a future mapping change never requires cache deletion.
     cached.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
     # 같은 파일의 옛 캐시 정리
     for old in cache_dir.glob(f"{path.stem}__*.json"):
         if old.name != key:
             old.unlink(missing_ok=True)
-    return snap
+    return apply_current_manager_mapping(snap)
 
 
 SNAPSHOT_PATTERNS = ("*설계사시상 진척현황*", "*설계사 인별실적시트*", "*인별실적*")
