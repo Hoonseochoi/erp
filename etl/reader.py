@@ -15,6 +15,7 @@ import io
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 import schema
@@ -306,21 +307,34 @@ def load_snapshot(path: Path, cache_dir: Path):
     return apply_current_manager_mapping(snap)
 
 
-SNAPSHOT_PATTERNS = ("*설계사시상 진척현황*", "*설계사 인별실적시트*", "*인별실적*")
+# 파일명에 들어 있어야 하는 조각. glob 대신 정규화 후 부분일치로 본다.
+#
+# ⚠ 한글 파일명은 자모 분해형(NFD)으로 내려오는 경우가 있다(브라우저·OS 조합에 따라).
+#   소스에 적은 리터럴은 NFC 라서 glob 이나 `in` 으로 비교하면 **조용히 안 맞는다**.
+#   2026-09-11 에 실제로 이 때문에 하루치가 통째로 누락됐다 — 오류도 안 났다.
+#   그래서 양쪽을 NFC 로 정규화해서 비교한다.
+SNAPSHOT_PATTERNS = ("설계사시상 진척현황", "설계사 인별실적시트", "인별실적")
+
+
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
 
 
 def discover(src_dir: Path):
     """소스 폴더에서 스냅샷 후보 파일 수집. 같은 기준일이면 최신 mtime 1개만."""
+    needles = [_nfc(x) for x in SNAPSHOT_PATTERNS]
     seen = {}
-    for pat in SNAPSHOT_PATTERNS:
-        for p in src_dir.glob(pat):
-            if p.suffix.lower() not in (".xlsb", ".xlsx"):
-                continue
-            if p.name.startswith("~$"):
-                continue
-            m = re.match(r"(\d{6})", p.name)
-            stamp = m[1] if m else p.stem
-            prev = seen.get(stamp)
-            if prev is None or p.stat().st_mtime > prev.stat().st_mtime:
-                seen[stamp] = p
+    for p in src_dir.iterdir():
+        if p.suffix.lower() not in (".xlsb", ".xlsx"):
+            continue
+        if p.name.startswith("~$"):
+            continue
+        name = _nfc(p.name)
+        if not any(n in name for n in needles):
+            continue
+        m = re.match(r"(\d{6})", name)
+        stamp = m[1] if m else p.stem
+        prev = seen.get(stamp)
+        if prev is None or p.stat().st_mtime > prev.stat().st_mtime:
+            seen[stamp] = p
     return [seen[k] for k in sorted(seen)]
