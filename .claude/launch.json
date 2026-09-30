@@ -2,10 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "매출 대시보드",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "dashboard"],
-      "port": 3000
+      "name": "ga7-dist",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-hoons-Documents-----/610949e0-5a13-4011-a6c7-7661a96ee948/scratchpad/serve.cjs"
+      ],
+      "port": 8788
     }
   ]
 }
