@@ -17,5 +17,6 @@ cd ~/Documents/prizedashboard
 .venv/bin/python web/ga7-dashboard/prepare.py --center 안양성남.GA1센터
 .venv/bin/python web/ga7-dashboard/design.py     # 설계일보를 받은 날만
 .venv/bin/python web/ga7-dashboard/ms.py         # M/S 파일을 받은 날만
+.venv/bin/python web/ga7-dashboard/branch.py     # GA 지사일보를 받은 날만
 cd github/ga7-sales-dashboard && GA7_SITES_PATH=../../artifacts/ga7-dashboard/sites.local.json npm run build && npm run deploy
 ```

@@ -7,7 +7,7 @@
 #
 # 옮기는 것
 #   * 일별 인별실적: 앞 6자리가 기준일(YYMMDD_ 또는 마감본 YYMMDD(9월최종)_)이고 이름에 '인별실적'·'설계사시상 진척현황'·'설계사 인별실적시트'
-#   * GA 설계일보·GA매니저일보 (설계 트렌드용, 이름으로만 판단)
+#   * GA 설계일보·GA매니저일보(설계 트렌드용)·GA 지사일보(지사 경영용) — 이름으로만 판단
 # 어센틱 M/S 파일(어센틱금융_손보사실적_지점별_*)은 이 폴더(매출분석)에 두면 ms.py 가 읽는다.
 #
 # 셸 glob 을 쓰지 않는 이유: 한글 파일명이 자모 분해형(NFD)으로 내려오는 경우가 있어
@@ -26,7 +26,8 @@ for p in sorted(src.iterdir()) if src.is_dir() else []:
     if p.suffix.lower() not in (".xlsb", ".xlsx") or p.name.startswith("~$"):
         continue
     name = nfc(p.name)
-    design = (nfc("GA매니저일보") in name and p.suffix.lower() == ".xlsb") or nfc("설계일보") in name
+    design = (nfc("GA매니저일보") in name and p.suffix.lower() == ".xlsb") or nfc("설계일보") in name \
+        or nfc("지사일보") in name
     # 일별 스냅샷은 앞 6자리가 기준일인 파일만 — '2608월최종(0901)_인별실적.xlsx' 같은 정리본은 건드리지 않는다.
     daily = re.match(r"\d{6}(\([^)]*최종[^)]*\))?_", name) and any(nfc(n) in name for n in SNAPSHOT_PATTERNS)
     if not (design or daily):
