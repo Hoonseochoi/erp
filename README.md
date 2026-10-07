@@ -15,6 +15,7 @@
 cd ~/Documents/prizedashboard
 .venv/bin/python web/ga7-dashboard/prepare.py
 .venv/bin/python web/ga7-dashboard/prepare.py --center 안양성남.GA1센터
+.venv/bin/python web/ga7-dashboard/prepare.py --center 안양성남.GA3센터
 .venv/bin/python web/ga7-dashboard/design.py     # 설계일보를 받은 날만
 .venv/bin/python web/ga7-dashboard/ms.py         # M/S 파일을 받은 날만
 .venv/bin/python web/ga7-dashboard/branch.py     # GA 지사일보를 받은 날만
