@@ -19,5 +19,6 @@ cd ~/Documents/prizedashboard
 .venv/bin/python web/ga7-dashboard/design.py     # 설계일보를 받은 날만
 .venv/bin/python web/ga7-dashboard/ms.py         # M/S 파일을 받은 날만
 .venv/bin/python web/ga7-dashboard/branch.py     # GA 지사일보를 받은 날만
+.venv/bin/python web/ga7-dashboard/contracts.py  # 계약반영 리스트를 받은 날만(RAW DATA 에 '계약반영 리스트*.xlsx')
 cd github/ga7-sales-dashboard && GA7_SITES_PATH=../../artifacts/ga7-dashboard/sites.local.json npm run build && npm run deploy
 ```
