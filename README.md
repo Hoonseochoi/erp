@@ -20,5 +20,6 @@ cd ~/Documents/prizedashboard
 .venv/bin/python web/ga7-dashboard/ms.py         # M/S 파일을 받은 날만
 .venv/bin/python web/ga7-dashboard/branch.py     # GA 지사일보를 받은 날만
 .venv/bin/python web/ga7-dashboard/contracts.py  # 계약반영 리스트를 받은 날만(RAW DATA 에 '계약반영 리스트*.xlsx')
+.venv/bin/python web/ga7-dashboard/authentic.py # 어센틱 팀 분류(삼성화재_보험사사원코드정보_*.xlsx)를 받은 날만 → 어센틱 분석 탭
 cd github/ga7-sales-dashboard && GA7_SITES_PATH=../../artifacts/ga7-dashboard/sites.local.json npm run build && npm run deploy
 ```
