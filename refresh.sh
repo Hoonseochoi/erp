@@ -10,6 +10,7 @@
 #   * GA 설계일보·GA매니저일보(설계 트렌드용)·GA 지사일보(지사 경영용) — 이름으로만 판단
 #   * 어센틱 M/S 파일(어센틱금융_손보사실적_지점별_*) → 이 폴더(매출분석, ms.py 가 읽는 곳)
 #   * 어센틱 팀 분류(삼성화재_보험사사원코드정보_*) → RAW DATA/어센틱팀 (authentic.py)
+#   * 계약 목록(계약반영 리스트*·*보유계약*) → RAW DATA (contracts.py · 계약 성향·트렌드)
 #
 # 셸 glob 을 쓰지 않는 이유: 한글 파일명이 자모 분해형(NFD)으로 내려오는 경우가 있어
 # 소스에 적은 NFC 리터럴과 바이트가 달라 **조용히 안 맞는다**(2026-09-11 하루치 누락 사고).
@@ -34,7 +35,8 @@ for p in sorted(src.iterdir()) if src.is_dir() else []:
     # 어센틱 팀 분류(보험사사원코드정보) → RAW DATA/어센틱팀 · 어센틱 M/S 원본 → 매출분석 폴더(ms.py 가 읽는 곳)
     team = nfc("보험사사원코드정보") in name
     ms = nfc("어센틱금융_손보사실적") in name
-    if not (design or daily or team or ms):
+    contract = (nfc("계약반영") in name or nfc("보유계약") in name) and p.suffix.lower() == ".xlsx"
+    if not (design or daily or team or ms or contract):
         continue
     dest = (raw / nfc("어센틱팀") / p.name) if team else (Path(sys.argv[3]) / p.name) if ms else (raw / p.name)
     dest.parent.mkdir(exist_ok=True)
